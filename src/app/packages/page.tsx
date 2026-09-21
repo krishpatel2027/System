@@ -58,22 +58,27 @@ export default function PackagesPage() {
         <Btn onClick={startNew}><Plus size={15} /> New Package</Btn>
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {db.packages.map((p) => (
+        {[...db.packages].sort((a, b) => a.low - b.low).map((p, i, arr) => {
+          const prev = i > 0 ? arr[i - 1] : null;
+          return (
           <Card key={p.id} className={`p-6 ${p.best ? "ring-2 ring-neutral-900 dark:ring-white" : ""}`}>
             {p.best && <Badge tone="green">MOST POPULAR</Badge>}
             <div className="mt-2 text-[16px] font-bold tracking-tight">{p.name}</div>
             <div className="text-[13px] text-neutral-500">{p.tagline}</div>
             <div className="mt-3 text-[22px] font-semibold">{inr(p.low)} – {p.high ? inr(p.high) : "Custom"}{p.high && p.high >= 150000 ? "+" : ""}</div>
+            {prev && <div className="mt-2 rounded-lg bg-emerald-50 px-2 py-1 text-[12px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">✓ Everything in {prev.name} +</div>}
             <ul className="mt-3 space-y-1.5">
               {p.features.map((f) => <li key={f} className="flex gap-2 text-[13px]"><span className="text-emerald-500">✓</span>{f}</li>)}
             </ul>
+            <div className="mt-2 text-[12px] text-neutral-400">Lower-tier basics bundled — never charged separately. Only the difference is quoted.</div>
             <div className="mt-4 flex gap-2">
               <Link href="/quotes?action=new" className="flex-1 rounded-xl border border-neutral-200 py-2 text-center text-[13px] font-medium hover:bg-neutral-50 dark:border-neutral-700">Use in Quote →</Link>
               <button onClick={() => startEdit(p)} className="rounded-xl border border-neutral-200 px-3 py-2 text-[13px] font-medium hover:bg-neutral-50 dark:border-neutral-700">Edit</button>
               <button onClick={() => remove(p.id)} className="rounded-xl px-2 py-2 text-[13px] text-red-500 hover:bg-red-50">✕</button>
             </div>
           </Card>
-        ))}
+          );
+        })}
       </div>
       <Card className="p-5 text-[13.5px] text-neutral-600 dark:text-neutral-300">
         <span className="font-semibold text-neutral-900 dark:text-white">Pricing philosophy — </span>

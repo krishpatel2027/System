@@ -15,6 +15,261 @@ export const HOURLY: Rate[] = [{"role":"UI/UX","rate":650,"low":500,"high":800},
 
 export const CARE: CarePlan[] = [{"name":"Care Basic","price":5000,"hours":5,"includes":"Backups, updates, security checks, minor fixes","bestFor":"Small sites"},{"name":"Care Standard","price":10000,"hours":10,"includes":"Everything Basic + content updates + performance monitoring","bestFor":"Active SMB sites"},{"name":"Care Growth","price":20000,"hours":20,"includes":"Everything Standard + SEO maintenance + performance improvements","bestFor":"Growth-focused businesses"},{"name":"Care Pro","price":35000,"hours":35,"includes":"Active development, priority support, continuous improvements","bestFor":"Businesses needing ongoing dev"},{"name":"Dedicated","price":75000,"hours":70,"includes":"External digital team capacity","bestFor":"Long-term clients"}];
 
-export const POLICIES: Policy[] = [{"policy":"Payment under ₹1L","standard":"50 / 30 / 20","details":"Start / design approval / final handover","client":"Work begins after advance; production handover follows final payment."},{"policy":"Payment ₹1L–₹5L","standard":"40 / 30 / 20 / 10","details":"Discovery / design / development / handover","client":"Milestones are tied to approvals and deliverables."},{"policy":"Payment ₹5L+","standard":"Milestone based","details":"Custom schedule","client":"Milestones and payment schedule are defined in the proposal."},{"policy":"Revisions","standard":"2 rounds per major phase","details":"Extra rounds become change requests","client":"Two reasonable revision rounds are included unless proposal states otherwise."},{"policy":"Scope changes","standard":"Quoted separately","details":"New features, pages, integrations, content","client":"Requests outside approved scope are estimated before implementation."},{"policy":"Third-party costs","standard":"Separate","details":"Hosting, domains, APIs, SaaS, fonts, stock, SMS, etc.","client":"Third-party subscriptions and usage-based services are billed separately unless included."},{"policy":"Rush work","standard":"+10% to +50%","details":"Depends on schedule compression","client":"Accelerated timelines may require a rush premium."},{"policy":"Contingency","standard":"10–25% internal","details":"Depends on uncertainty","client":"Internal buffer is not presented as a hidden line item."},{"policy":"Warranty","standard":"14 days","details":"Bug fixes for delivered scope","client":"Post-launch bug fixes for approved scope are covered for 14 days."},{"policy":"Content","standard":"Client or Arkria","details":"If Arkria creates content, quote separately","client":"Client-supplied content must be provided in agreed formats and timelines."},{"policy":"Handover","standard":"Final payment first","details":"Source/build/access transfer","client":"Production handover and ownership transfer follow final payment."},{"policy":"Cancellation","standard":"Milestone based","details":"Completed work remains billable","client":"Cancellation does not waive payment for completed approved work."}];
+export const POLICIES: Policy[] = [{"policy":"Payment under ₹1L","standard":"50 / 30 / 20","details":"Start (non-refundable advance) / design delivery — deemed approved in 7 days / final handover (after final payment)","client":"50% non-refundable advance to start. Design counts as approved 7 days after delivery if no feedback. Handover follows final payment; work pauses if a milestone is 7+ days overdue."},{"policy":"Payment ₹1L–₹5L","standard":"40 / 30 / 20 / 10","details":"Discovery sign-off / design delivery (deemed approved in 7 days) / staging demo / handover (after final payment)","client":"Milestones are tied to deliveries, not waiting time. Invoices payable in 7 days; overdue milestones pause the schedule."},{"policy":"Payment ₹5L+","standard":"Milestone based","details":"Custom schedule","client":"Milestones and payment schedule are defined in the proposal; the same 7-day pay and pause terms apply."},{"policy":"Revisions","standard":"2 rounds per major phase","details":"Extra rounds become change requests","client":"Two reasonable revision rounds are included unless proposal states otherwise."},{"policy":"Scope changes","standard":"Quoted separately","details":"New features, pages, integrations, content","client":"Requests outside approved scope are estimated before implementation."},{"policy":"Third-party costs","standard":"Separate","details":"Hosting, domains, APIs, SaaS, fonts, stock, SMS, etc.","client":"Third-party subscriptions and usage-based services are billed separately unless included."},{"policy":"Rush work","standard":"+10% to +50%","details":"Depends on schedule compression","client":"Accelerated timelines may require a rush premium."},{"policy":"Contingency","standard":"10–25% internal","details":"Depends on uncertainty","client":"Internal buffer is not presented as a hidden line item."},{"policy":"Warranty","standard":"14 days","details":"Bug fixes for delivered scope","client":"Post-launch bug fixes for approved scope are covered for 14 days."},{"policy":"Content","standard":"Client or Arkria","details":"If Arkria creates content, quote separately","client":"Client-supplied content must be provided in agreed formats and timelines."},{"policy":"Handover","standard":"Final payment first","details":"Source/build/access transfer","client":"Production handover and ownership transfer follow final payment."},{"policy":"Due date","standard":"7 days","details":"Invoices payable in 7 days; work pauses past due","client":"Please clear each milestone within 7 days so your launch date holds."},{"policy":"Cancellation","standard":"Kill fee","details":"Advance non-refundable; cancel = completed work or 25% of balance, whichever is higher","client":"If you pause or cancel, the advance stays and completed work plus 25% of the remaining balance is due for reserved time."}];
 
 export const COMPLEXITY_MAP: Record<string, number> = { Simple: 1, Standard: 1.15, Advanced: 1.35, Complex: 1.6, Enterprise: 2 };
+
+// Tier order (low → high). Higher tiers include everything in lower tiers.
+export const PACKAGE_ORDER = ["Launch", "Business", "Pro", "Experience", "Custom"];
+
+// Basics bundled per tier (names must match FEATURES[].feature).
+// A selected feature already in the bundle is NOT charged separately —
+// the calculator prices it at ₹0 and marks it "Included".
+export const PACKAGE_INCLUDED: Record<string, string[]> = {
+  Launch: [
+    "Responsive implementation",
+    "Basic contact form",
+    "WhatsApp button",
+    "SEO foundation",
+    "Hosting setup",
+    "Project management",
+    "Micro interactions",
+    "Reveal animations",
+  ],
+  Business: [
+    "UI/UX design",
+    "Wireframes",
+    "Multi-field lead form",
+    "WhatsApp lead integration",
+    "Analytics setup",
+    "Search Console",
+    "Basic CMS",
+    "On-page SEO",
+    "Scroll animations",
+    "Performance optimization",
+  ],
+  Pro: [
+    "Design system",
+    "Blog CMS",
+    "Media library",
+    "Multi-step form",
+    "CRM integration",
+    "Email automation",
+    "Technical SEO audit",
+    "Schema markup",
+    "Image optimization",
+    "Parallax",
+    "Page transitions",
+    "Animated cards",
+    "Client training",
+    "Technical documentation",
+  ],
+  Experience: [
+    "GSAP timeline",
+    "Pinned scrolling",
+    "Horizontal scrolling",
+    "Advanced CMS",
+    "Custom API",
+    "API integration",
+    "Three.js scene",
+    "Security hardening",
+    "CDN setup",
+    "Prototype",
+  ],
+  // Custom is scope-based: inherits every lower tier, adds nothing fixed.
+  Custom: [],
+};
+
+// Union of this tier + every tier below it.
+export function getPackageIncluded(pkgName: string): string[] {
+  const idx = PACKAGE_ORDER.indexOf(pkgName);
+  if (idx < 0) return [];
+  const out: string[] = [];
+  for (let i = 0; i <= idx; i++) {
+    const tier = PACKAGE_ORDER[i];
+    for (const f of PACKAGE_INCLUDED[tier] ?? []) {
+      if (!out.includes(f)) out.push(f);
+    }
+  }
+  return out;
+}
+
+export interface TypePreset {
+  // Suggested package, complexity and page count when this product type is picked.
+  pkg: string;
+  complexity: string;
+  pages: number;
+  // Feature names (must match FEATURES[].feature) pre-ticked additively.
+  // Anything already bundled in the package costs ₹0; the rest is priced.
+  features: string[];
+}
+
+// Per-product-type starting points. Switching product type applies these
+// (extras are preserved — presets only add ticks, never remove them).
+export const TYPE_PRESETS: Record<string, TypePreset> = {
+  "Landing Page": {
+    pkg: "Launch",
+    complexity: "Simple",
+    pages: 1,
+    features: [
+      "Landing page",
+      "Basic contact form",
+      "WhatsApp button",
+      "Analytics setup",
+      "SEO foundation",
+      "Responsive implementation",
+      "Micro interactions",
+      "Hosting setup",
+      "Project management",
+    ],
+  },
+  "Website 3–5 pages": {
+    pkg: "Launch",
+    complexity: "Standard",
+    pages: 4,
+    features: [
+      "Standard page",
+      "Basic contact form",
+      "WhatsApp button",
+      "Basic CMS",
+      "Analytics setup",
+      "On-page SEO",
+      "SEO foundation",
+      "Responsive implementation",
+      "UI/UX design",
+      "Hosting setup",
+      "Project management",
+    ],
+  },
+  "Website 5–8 pages": {
+    pkg: "Business",
+    complexity: "Standard",
+    pages: 6,
+    features: [
+      "Standard page",
+      "Blog CMS",
+      "Multi-field lead form",
+      "WhatsApp lead integration",
+      "Search Console",
+      "Performance optimization",
+    ],
+  },
+  "Corporate Website": {
+    pkg: "Pro",
+    complexity: "Advanced",
+    pages: 12,
+    features: [
+      "Standard page",
+      "Complex page",
+      "Blog CMS",
+      "Media library",
+      "Multi-field lead form",
+      "Analytics setup",
+      "Technical SEO audit",
+      "Accessibility pass",
+    ],
+  },
+  "Premium Animated Website": {
+    pkg: "Experience",
+    complexity: "Advanced",
+    pages: 6,
+    features: [
+      "GSAP timeline",
+      "Scroll animations",
+      "Pinned scrolling",
+      "Page transitions",
+      "Parallax",
+      "Micro interactions",
+      "Prototype",
+      "Performance optimization",
+      "Image optimization",
+    ],
+  },
+  "Basic E-commerce": {
+    pkg: "Pro",
+    complexity: "Standard",
+    pages: 8,
+    features: [
+      "WooCommerce setup",
+      "Product catalog",
+      "Cart",
+      "Checkout",
+      "Payment gateway",
+      "GST/tax setup",
+      "Shipping integration",
+      "Product filters",
+      "Analytics setup",
+    ],
+  },
+  "Custom E-commerce": {
+    pkg: "Custom",
+    complexity: "Complex",
+    pages: 10,
+    features: [
+      "WooCommerce setup",
+      "Product catalog",
+      "Cart",
+      "Checkout",
+      "Payment gateway",
+      "GST/tax setup",
+      "Shipping integration",
+      "Coupons/discounts",
+      "Inventory management",
+      "Reviews",
+      "Wishlist",
+      "Advanced search",
+      "Admin dashboard",
+      "Custom API",
+    ],
+  },
+  "Web App MVP": {
+    pkg: "Custom",
+    complexity: "Complex",
+    pages: 8,
+    features: [
+      "Authentication",
+      "User roles",
+      "Admin dashboard",
+      "User dashboard",
+      "Database design",
+      "Custom API",
+      "File storage",
+      "Notifications",
+      "UI/UX design",
+      "Responsive implementation",
+      "Technical documentation",
+      "Project management",
+    ],
+  },
+  "Mobile App MVP": {
+    pkg: "Custom",
+    complexity: "Complex",
+    pages: 8,
+    features: [
+      "React Native/Flutter app shell",
+      "Authentication",
+      "Push notifications",
+      "App Store deployment",
+      "Play Store deployment",
+      "Database design",
+      "Custom API",
+      "UI/UX design",
+      "Project management",
+    ],
+  },
+};
+
+// Feature categories relevant per product type (must match FEATURES[].category).
+// The builder + rate card default to these so a mobile app never wades through
+// page/CMS/SEO rows. Typing in search looks across all 143; "Show all" reveals all.
+export const TYPE_CATEGORIES: Record<string, string[]> = {
+  "Landing Page": ["Website", "Forms", "Integrations", "Design", "Motion", "SEO", "Infrastructure", "Content", "Management"],
+  "Website 3–5 pages": ["Website", "Forms", "Integrations", "CMS", "Booking", "Design", "Motion", "SEO", "Infrastructure", "Content", "Management"],
+  "Website 5–8 pages": ["Website", "Forms", "Integrations", "CMS", "Booking", "Design", "Motion", "SEO", "Infrastructure", "Content", "Management"],
+  "Corporate Website": ["Website", "Forms", "Integrations", "CMS", "Booking", "Design", "Motion", "SEO", "Infrastructure", "Content", "Management"],
+  "Premium Animated Website": ["Website", "Design", "Motion", "3D/WebGL", "CMS", "Forms", "Integrations", "SEO", "Infrastructure", "Content", "Management"],
+  "Basic E-commerce": ["E-commerce", "Website", "Forms", "Integrations", "CMS", "Booking", "Design", "SEO", "Infrastructure", "Content", "Management"],
+  "Custom E-commerce": ["E-commerce", "Web App", "Website", "Forms", "Integrations", "CMS", "Booking", "Design", "Motion", "SEO", "Infrastructure", "Content", "Management"],
+  "Web App MVP": ["Web App", "Website", "Forms", "Integrations", "CMS", "Design", "AI", "SEO", "Infrastructure", "Content", "Management"],
+  "Mobile App MVP": ["Mobile", "Web App", "Design", "Integrations", "AI", "Infrastructure", "Content", "Management"],
+};
