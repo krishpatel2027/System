@@ -1,5 +1,5 @@
 "use client";
-import React, { Suspense, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useDB } from "@/lib/store";
 import { inr, uid, todayISO, addDaysISO } from "@/lib/utils";
@@ -78,7 +78,7 @@ function QuotesInner() {
         {fromPricing && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-[13px] text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">✓ Prefilled from Pricing Calculator — grouped deliverables, internals hidden.</div>}
         <div className="grid gap-3">
           <Field label="Client"><select className={inputCls} value={clientName} onChange={(e) => setClientName(e.target.value)}>{db.clients.map(c=><option key={c.id} value={c.company}>{c.company}</option>)}<option value="New Client">+ New Client…</option></select></Field>
-          {items.map((it, idx) => (
+          {items.map((it) => (
             <div key={it.id} className="grid grid-cols-[1fr_70px_110px_32px] gap-2">
               <input className={inputCls} value={it.label} onChange={(e) => setItems(items.map((x) => (x.id === it.id ? { ...x, label: e.target.value } : x)))} />
               <input type="number" className={inputCls} value={it.qty} onChange={(e) => setItems(items.map((x) => (x.id === it.id ? { ...x, qty: Number(e.target.value) } : x)))} />

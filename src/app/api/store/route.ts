@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { backendMode, requireToken, serverLoad, serverSave } from "@/lib/server-store";
+import { requireToken, serverLoad, serverSave } from "@/lib/server-store";
 
 // GET /api/store — load the persisted DB document (or null when empty).
 export async function GET(req: Request) {

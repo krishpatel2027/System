@@ -8,7 +8,6 @@ import { Plus, ArrowRight, AlertCircle } from "lucide-react";
 
 export default function Dashboard() {
   const { db } = useDB();
-  // eslint-disable-next-line react-hooks/purity -- dashboard "today" snapshot, stable per mount
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
   // eslint-disable-next-line react-hooks/purity -- dashboard "now" snapshot, stable per mount
   const nowMs = useMemo(() => Date.now(), []);
