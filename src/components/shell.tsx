@@ -31,7 +31,7 @@ const NAV = [
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
-  const { db } = useDB();
+  const { db, sync, backend, lastSyncedAt, refreshFromServer } = useDB();
   const [dark, setDark] = useState(false);
   const [palette, setPalette] = useState(false);
   const [q, setQ] = useState("");
@@ -137,6 +137,26 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <span className="ml-auto hidden items-center gap-1 rounded-md bg-neutral-100 px-1.5 py-0.5 text-[11px] sm:flex dark:bg-neutral-800">Ctrl K</span>
             </button>
             <div className="ml-auto flex items-center gap-1.5">
+              <button
+                onClick={() => { if (sync === "error" || sync === "local") void refreshFromServer(); }}
+                title={lastSyncedAt ? `Last synced: ${new Date(lastSyncedAt).toLocaleString()}${backend ? ` · backend: ${backend}` : ""}` : backend ? `Backend: ${backend}` : "Local only — server unreachable"}
+                className={cn(
+                  "hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-medium md:flex",
+                  sync === "synced" && "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
+                  (sync === "pulling" || sync === "pushing") && "animate-pulse border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
+                  sync === "error" && "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300",
+                  sync === "local" && "border-neutral-200 bg-neutral-100 text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800 dark:text-neutral-400"
+                )}
+              >
+                <span className={cn(
+                  "h-1.5 w-1.5 rounded-full",
+                  sync === "synced" && "bg-emerald-500",
+                  (sync === "pulling" || sync === "pushing") && "bg-amber-500",
+                  sync === "error" && "bg-red-500",
+                  sync === "local" && "bg-neutral-400"
+                )} />
+                {sync === "synced" ? `Synced${backend ? ` · ${backend}` : ""}` : sync === "pulling" ? "Pulling…" : sync === "pushing" ? "Saving…" : sync === "error" ? "Sync error — retry" : "Local only"}
+              </button>
               <div className="relative group">
                 <button className="relative rounded-xl p-2 hover:bg-neutral-200/60 dark:hover:bg-neutral-800" title="Notifications">
                   <Bell size={17} />

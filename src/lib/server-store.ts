@@ -24,18 +24,32 @@ function filePath(): string {
   return path.join(process.cwd(), "data", "arkria.json");
 }
 
-async function fileLoad(): Promise<unknown | null> {
+async function fileLoad(): Promise<{ data: unknown | null; updatedAt: string | null }> {
   try {
     const raw = await fs.readFile(filePath(), "utf-8");
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw) as { data?: unknown; updatedAt?: string } | Record<string, unknown>;
+    // Backward compat: old file stored the DB document directly.
+    if (parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).leads)) {
+      return { data: parsed, updatedAt: null };
+    }
+    if (parsed && typeof parsed === "object" && "data" in parsed) {
+      const w = parsed as { data?: unknown; updatedAt?: string };
+      return { data: w.data ?? null, updatedAt: w.updatedAt ?? null };
+    }
+    return { data: null, updatedAt: null };
   } catch {
-    return null;
+    return { data: null, updatedAt: null };
   }
 }
 
-async function fileSave(data: unknown): Promise<void> {
+async function fileSave(data: unknown): Promise<string> {
+  const updatedAt = new Date().toISOString();
   await fs.mkdir(path.dirname(filePath()), { recursive: true });
-  await fs.writeFile(filePath(), JSON.stringify(data), "utf-8");
+  // Atomic write: tmp + rename so concurrent PUTs can't leave a torn file.
+  const tmp = `${filePath()}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify({ data, updatedAt }), "utf-8");
+  await fs.rename(tmp, filePath());
+  return updatedAt;
 }
 
 function sbHeaders(): Record<string, string> {
@@ -46,33 +60,34 @@ function sbHeaders(): Record<string, string> {
   };
 }
 
-async function sbLoad(): Promise<unknown | null> {
-  const url = `${process.env.SUPABASE_URL}/rest/v1/arkria_store?id=eq.main&select=data`;
+async function sbLoad(): Promise<{ data: unknown | null; updatedAt: string | null }> {
+  const url = `${process.env.SUPABASE_URL}/rest/v1/arkria_store?id=eq.main&select=data,updated_at`;
   const res = await fetch(url, { headers: sbHeaders(), cache: "no-store" });
   if (!res.ok) throw new Error(`Supabase load failed: ${res.status}`);
-  const rows = (await res.json()) as { data: unknown }[];
-  return rows[0]?.data ?? null;
+  const rows = (await res.json()) as { data: unknown; updated_at?: string }[];
+  return { data: rows[0]?.data ?? null, updatedAt: rows[0]?.updated_at ?? null };
 }
 
-async function sbSave(data: unknown): Promise<void> {
-  const url = `${process.env.SUPABASE_URL}/rest/v1/arkria_store?id=eq.main`;
+async function sbSave(data: unknown): Promise<string> {
+  // Upsert so the first save works even if the seed INSERT was never run.
+  const url = `${process.env.SUPABASE_URL}/rest/v1/arkria_store?on_conflict=id`;
   const res = await fetch(url, {
-    method: "PATCH",
-    headers: { ...sbHeaders(), Prefer: "return=minimal" },
-    body: JSON.stringify({ data }),
+    method: "POST",
+    headers: { ...sbHeaders(), Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ id: "main", data }),
   });
   if (!res.ok) throw new Error(`Supabase save failed: ${res.status}`);
+  return new Date().toISOString();
 }
 
-export async function serverLoad(): Promise<{ mode: BackendMode; data: unknown | null }> {
+export async function serverLoad(): Promise<{ mode: BackendMode; data: unknown | null; updatedAt: string | null }> {
   const mode = backendMode();
-  const data = mode === "supabase" ? await sbLoad() : await fileLoad();
-  return { mode, data };
+  const { data, updatedAt } = mode === "supabase" ? await sbLoad() : await fileLoad();
+  return { mode, data, updatedAt };
 }
 
-export async function serverSave(data: unknown): Promise<{ mode: BackendMode }> {
+export async function serverSave(data: unknown): Promise<{ mode: BackendMode; updatedAt: string }> {
   const mode = backendMode();
-  if (mode === "supabase") await sbSave(data);
-  else await fileSave(data);
-  return { mode };
+  const updatedAt = mode === "supabase" ? await sbSave(data) : await fileSave(data);
+  return { mode, updatedAt };
 }

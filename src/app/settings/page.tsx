@@ -6,7 +6,7 @@ import { seedDB } from "@/lib/seed";
 import type { DB } from "@/lib/types";
 
 export default function SettingsPage() {
-  const { db, update, reset } = useDB();
+  const { db, update, reset, sync, backend, lastSyncedAt, refreshFromServer } = useDB();
   const s = db.settings;
   const set = (k: keyof typeof s, v: string) => update("settings", { ...s, [k]: v });
   const fileRef = useRef<HTMLInputElement>(null);
@@ -50,7 +50,24 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-4">
-      <div><h1 className="text-[22px] font-semibold tracking-tight">Settings</h1><p className="text-[13px] text-neutral-500">Studio config · data syncs to server when backend is configured</p></div>
+      <div><h1 className="text-[22px] font-semibold tracking-tight">Settings</h1><p className="text-[13px] text-neutral-500">Studio config · backup · backend sync</p></div>
+      <Card className="p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <div>
+            <div className="text-[14px] font-semibold">Backend &amp; sync</div>
+            <div className="text-[12.5px] text-neutral-500">
+              Backend: <span className="font-medium text-neutral-800 dark:text-neutral-200">{backend ?? "…"}</span>
+              {" · "}Status: <span className="font-medium text-neutral-800 dark:text-neutral-200">{sync}</span>
+              {lastSyncedAt ? ` · Last synced: ${new Date(lastSyncedAt).toLocaleString()}` : " · Never synced yet"}
+            </div>
+          </div>
+          <Btn variant="outline" onClick={() => void refreshFromServer()} className="ml-auto">
+            {sync === "pulling" ? "Pulling…" : "Pull from server"}
+          </Btn>
+        </div>
+        {sync === "error" && <p className="mt-2 text-[12.5px] text-red-600">Server sync failed. Check the backend is running (and log in via /login if a password is set), then retry.</p>}
+        {sync === "local" && <p className="mt-2 text-[12.5px] text-neutral-500">Working locally — the app keeps saving to this browser and will sync when the server is reachable.</p>}
+      </Card>
       <Card className="p-5">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Studio"><input className={inputCls} value={s.studio} onChange={(e) => set("studio", e.target.value)} /></Field>
