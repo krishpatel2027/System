@@ -1,31 +1,25 @@
-  -- Arkria Studio OS — Supabase (Postgres) schema
-  -- Mirrors src/lib/types.ts. Run once in the Supabase SQL editor.
-  -- Uses JSONB for nested collections to keep the migration 1:1 with the
-  -- localStorage document model; normalize later if you need SQL queries.
+-- Arkria Studio OS — Supabase (Postgres) schema.
+-- Run this once in the Supabase SQL editor (Project → SQL editor → New query).
+-- It is safe to run again: every statement is idempotent, so re-running it
+-- also upgrades older installs.
 
-  create table if not exists public.arkria_store (
-    id text primary key default 'main',
-    data jsonb not null default '{}'::jsonb,
-    updated_at timestamptz not null default now()
-  );
+-- The whole workspace is stored as one JSON document with a version number.
+-- Every save names the version it was based on; if a teammate saved first the
+-- app merges both sets of changes and retries, so nobody's work is lost.
+create table if not exists public.arkria_store (
+  id text primary key default 'main',
+  data jsonb not null default '{}'::jsonb,
+  version bigint not null default 0,
+  updated_at timestamptz not null default now()
+);
 
-  -- One row holds the whole DB document (same shape as the DB interface).
-  insert into public.arkria_store (id, data)
-  values ('main', '{}'::jsonb)
-  on conflict (id) do nothing;
+-- Upgrade path for installs created before versioning existed.
+alter table public.arkria_store add column if not exists version bigint not null default 0;
 
-  -- Enable RLS; the service-role key bypasses it (used by /api/store).
-  -- The anon key gets no access unless you add policies below.
-  alter table public.arkria_store enable row level security;
+insert into public.arkria_store (id, data, version)
+values ('main', '{}'::jsonb, 0)
+on conflict (id) do nothing;
 
-  -- Optional: allow authenticated users to read the store.
-  -- create policy "authenticated read"
-  --   on public.arkria_store for select
-  --   to authenticated
-  --   using (true);
-
-  -- Optional normalized tables (future use — API still uses arkria_store v1):
-  -- create table if not exists public.leads (id text primary key, data jsonb not null, updated_at timestamptz default now());
-  -- create table if not exists public.clients (id text primary key, data jsonb not null, updated_at timestamptz default now());
-  -- create table if not exists public.projects (id text primary key, data jsonb not null, updated_at timestamptz default now());
-  -- create table if not exists public.payments (id text primary key, data jsonb not null, updated_at timestamptz default now());
+-- Only the server (using the service-role key, which bypasses RLS) may read or
+-- write. With RLS on and no policies, the public anon key has no access at all.
+alter table public.arkria_store enable row level security;

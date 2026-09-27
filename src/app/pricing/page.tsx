@@ -1,39 +1,46 @@
 "use client";
-import React, { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { Suspense, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { inr, uid } from "@/lib/utils";
 import { Card, CardHeader, Btn, Field, inputCls, Badge, PageHeader, Tabs } from "@/components/ui";
-import { ArrowRight, Copy, Download, Save, FolderOpen, Check, Search } from "lucide-react";
-import {
-  FEATURES, CALC_PACKAGES, HOURLY, CARE, POLICIES,
-  PACKAGE_ORDER, getPackageIncluded, TYPE_PRESETS,
-} from "@/lib/pricing-data";
+import { ArrowRight, Copy, Download, Save, FolderOpen, Check, Search, Pencil } from "lucide-react";
+import { packageBundle, TYPE_PRESETS } from "@/lib/pricing-data";
 import { PENDING_KEY, PRICING_SAVE_KEY as SAVE_KEY } from "./_studio";
+import { useDB } from "@/lib/store";
 import type { QuoteItem } from "@/lib/types";
 
 const TABS = ["Calculator", "Rate Card", "Care Plans", "Policies"] as const;
-const DEFAULT_PKG = "Business";
 
-export default function PricingPage() {
+function PricingInner() {
   const router = useRouter();
+  const params = useSearchParams();
+  const { db } = useDB();
+  const { packages, features, carePlans, policies, hourly } = db.pricing;
   const [tab, setTab] = useState<(typeof TABS)[number]>("Calculator");
 
-  const [pkg, setPkg] = useState(DEFAULT_PKG);
+  const [pkgId, setPkgId] = useState<string | null>(params.get("package"));
   const [quickStart, setQuickStart] = useState("");
   const [discount, setDiscount] = useState(0);
-  const [gst, setGst] = useState(18);
+  const [gstOverride, setGst] = useState<number | null>(null);
   const [q, setQ] = useState("");
+  const gst = gstOverride ?? db.settings.defaultGst;
+
+  // Chosen package (falls back to the popular one if a teammate removed it).
+  const pkgObj = packages.find((p) => p.id === pkgId) ?? packages.find((p) => p.popular) ?? packages[0];
+  const pkg = pkgObj?.name ?? "";
 
   // User-picked extras only — never the current package's bundled basics.
   // Bundled items are always ₹0 and always shown checked, purely from
-  // includedSet(pkg); they're never written into sel, so switching to a
-  // cheaper package can't turn yesterday's "included" into today's "extra".
+  // includedSet; they're never written into sel, so switching to a cheaper
+  // package can't turn yesterday's "included" into today's "extra".
   const [sel, setSel] = useState<Set<string>>(new Set());
 
-  const includedSet = useMemo(() => new Set(getPackageIncluded(pkg)), [pkg]);
+  const includedSet = useMemo(() => new Set(pkgObj ? packageBundle(packages, pkgObj.id) : []), [packages, pkgObj]);
+  const priceOf = (name: string) => features.find((f) => f.feature === name)?.standard ?? 0;
 
-  const choosePackage = (name: string) => {
-    setPkg(name);
+  const choosePackage = (id: string) => {
+    setPkgId(id);
     setQuickStart("");
   };
 
@@ -41,8 +48,10 @@ export default function PricingPage() {
     setQuickStart(name);
     const preset = TYPE_PRESETS[name];
     if (!preset) return;
-    setPkg(preset.pkg);
-    setSel((prev) => new Set([...prev, ...preset.features]));
+    const match = packages.find((p) => p.name.toLowerCase() === preset.pkg.toLowerCase());
+    if (match) setPkgId(match.id);
+    const known = new Set(features.map((f) => f.feature));
+    setSel((prev) => new Set([...prev, ...preset.features.filter((f) => known.has(f))]));
   };
 
   const toggleFeature = (name: string) => {
@@ -55,23 +64,21 @@ export default function PricingPage() {
     });
   };
 
-  const categories = useMemo(() => [...new Set(FEATURES.map((f) => f.category))], []);
   const grouped = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const filtered = needle
-      ? FEATURES.filter((f) => `${f.feature} ${f.category} ${f.notes}`.toLowerCase().includes(needle))
-      : FEATURES;
+    const filtered = needle ? features.filter((f) => `${f.feature} ${f.category} ${f.notes}`.toLowerCase().includes(needle)) : features;
+    const categories = [...new Set(features.map((f) => f.category))];
     return categories
       .map((c) => ({ category: c, items: filtered.filter((f) => f.category === c) }))
       .filter((g) => g.items.length > 0);
-  }, [categories, q]);
+  }, [features, q]);
 
   const calc = useMemo(() => {
-    const pkgObj = CALC_PACKAGES.find((p) => p.name === pkg);
     const base = pkgObj?.price ?? 0;
-    const extras = [...sel].filter((name) => !includedSet.has(name));
+    const known = new Set(features.map((f) => f.feature));
+    const extras = [...sel].filter((name) => !includedSet.has(name) && known.has(name));
     const included = [...includedSet];
-    const extrasTotal = extras.reduce((s, name) => s + (FEATURES.find((f) => f.feature === name)?.standard ?? 0), 0);
+    const extrasTotal = extras.reduce((a, name) => a + (features.find((f) => f.feature === name)?.standard ?? 0), 0);
     const subtotal = base + extrasTotal;
     const disc = (subtotal * discount) / 100;
     const beforeGST = subtotal - disc;
@@ -81,7 +88,7 @@ export default function PricingPage() {
 
     const quoteText =
       `Investment — ${inr(rounded)}\n` +
-      `Package: ${pkgObj?.name ?? pkg} — ${pkgObj?.scope ?? ""}\n` +
+      `Package: ${pkgObj?.name ?? ""} — ${pkgObj?.scope ?? ""}\n` +
       `Includes\n• Custom responsive design & development\n` +
       `${included.map((n) => `• ${n} (Included)`).join("\n")}${included.length ? "\n" : ""}` +
       `${extras.map((n) => `• ${n}`).join("\n") || "• Selected scope/features"}\n` +
@@ -89,36 +96,35 @@ export default function PricingPage() {
       `Third-party subscriptions and usage-based services are billed separately unless explicitly included.\n\n` +
       `GST @ ${gst}%: ${inr(gstAmt)}\nClient total incl. GST: ${inr(total)}`;
 
-    return { base, extras, included, extrasTotal, subtotal, disc, beforeGST, gstAmt, total, rounded, quoteText, pkgObj };
-  }, [pkg, sel, discount, gst, includedSet]);
+    return { base, extras, included, extrasTotal, subtotal, disc, beforeGST, gstAmt, total, rounded, quoteText };
+  }, [pkgObj, sel, discount, gst, includedSet, features]);
 
   const sendToQuote = () => {
     const items: QuoteItem[] = [
-      { id: uid("qi"), label: `${calc.pkgObj?.name ?? pkg} package — ${calc.pkgObj?.scope ?? ""}`, qty: 1, price: calc.base },
-      ...calc.extras.map((name) => ({ id: uid("qi"), label: name, qty: 1, price: FEATURES.find((f) => f.feature === name)?.standard ?? 0 })),
+      { id: uid("qi"), label: `${pkgObj?.name ?? "Website"} package — ${pkgObj?.scope ?? ""}`, qty: 1, price: calc.base },
+      ...calc.extras.map((name) => ({ id: uid("qi"), label: name, qty: 1, price: priceOf(name) })),
     ];
     try {
-      localStorage.setItem(PENDING_KEY, JSON.stringify({ items, discount: Math.round(calc.disc), note: `GST extra` }));
+      localStorage.setItem(PENDING_KEY, JSON.stringify({ items, discount: Math.round(calc.disc) }));
     } catch {}
-    router.push("/quotes?action=new&from=pricing");
+    router.push("/quotes?from=pricing");
   };
 
   const saveProject = () => {
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ package: pkg, discount, gst, selected: [...sel] }));
-      alert("Project saved in this browser.");
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ packageId: pkgObj?.id, discount, gst, selected: [...sel] }));
+      alert("Saved on this device. Use Load to bring it back.");
     } catch {}
   };
   const loadProject = () => {
     try {
       const raw = localStorage.getItem(SAVE_KEY);
-      if (!raw) return alert("No saved project found.");
-      const s = JSON.parse(raw);
-      setPkg(s.package ?? DEFAULT_PKG);
-      setDiscount(s.discount ?? 0);
-      setGst(s.gst ?? 18);
-      setSel(new Set(s.selected ?? []));
-      alert("Saved project loaded.");
+      if (!raw) return alert("Nothing saved on this device yet.");
+      const saved = JSON.parse(raw);
+      setPkgId(saved.packageId ?? packages.find((p) => p.name === saved.package)?.id ?? null);
+      setDiscount(saved.discount ?? 0);
+      setGst(saved.gst ?? null);
+      setSel(new Set(saved.selected ?? []));
     } catch {}
   };
 
@@ -141,20 +147,19 @@ export default function PricingPage() {
           <div className="space-y-4">
             <Card>
               <CardHeader title={<span className="flex items-center gap-2"><Step n={1} />Choose a package</span>}
-                sub={`${getPackageIncluded(pkg).length} essentials are bundled into ${pkg} at no extra charge.`}
-                action={
+                sub={`${includedSet.size} essentials are bundled into ${pkg} at no extra charge.`}
+                action={<div className="flex items-center gap-2"><EditLink section="packages" />
                   <select className={`${inputCls} !w-auto text-[12.5px]`} value={quickStart} onChange={(e) => applyQuickStart(e.target.value)}>
                     <option value="">Quick start by project type…</option>
                     {Object.keys(TYPE_PRESETS).map((p) => <option key={p} value={p}>{p}</option>)}
-                  </select>
+                  </select></div>
                 } />
               <div className="grid gap-2 p-5 sm:grid-cols-2 xl:grid-cols-5">
-                {CALC_PACKAGES.map((p) => {
-                  const idx = PACKAGE_ORDER.indexOf(p.name);
-                  const prev = idx > 0 ? PACKAGE_ORDER[idx - 1] : null;
-                  const active = pkg === p.name;
+                {packages.map((p, idx) => {
+                  const prev = idx > 0 ? packages[idx - 1].name : null;
+                  const active = pkgObj?.id === p.id;
                   return (
-                    <button key={p.name} onClick={() => choosePackage(p.name)}
+                    <button key={p.id} onClick={() => choosePackage(p.id)}
                       className={`relative flex flex-col items-start rounded-xl border p-3.5 text-left transition ${active ? "border-accent bg-accent-soft ring-1 ring-accent" : "border-line bg-surface hover:border-line-strong hover:bg-surface-2/60"}`}>
                       <div className={`text-[10.5px] font-semibold uppercase tracking-[0.1em] ${active ? "text-accent" : "text-subtle"}`}>{p.positioning}</div>
                       <div className="mt-1 text-[14px] font-semibold">{p.name}</div>
@@ -246,14 +251,14 @@ export default function PricingPage() {
 
       {tab === "Rate Card" && (
         <Card className="overflow-hidden">
-          <CardHeader title="Rate card" sub={`${FEATURES.length} internal starting prices — not client-facing line-item promises.`} />
+          <CardHeader title="Rate card" sub={`${features.length} internal starting prices — not client-facing line-item promises.`} action={<EditLink section="rates" />} />
           <div className="mt-4 max-h-[65vh] overflow-auto border-t border-line">
             <table className="w-full min-w-[640px] text-[13px]">
               <thead className="sticky top-0 bg-surface-2 text-left text-[12px] text-muted">
                 <tr><th className="px-4 py-2.5 font-medium">Feature</th><th className="px-4 py-2.5 font-medium">Category</th><th className="px-4 py-2.5 font-medium">Unit</th><th className="px-4 py-2.5 text-right font-medium">Entry</th><th className="px-4 py-2.5 text-right font-medium">Standard</th><th className="px-4 py-2.5 text-right font-medium">Premium</th></tr>
               </thead>
               <tbody className="divide-y divide-line">
-                {FEATURES.map((f, i) => (
+                {features.map((f, i) => (
                   <tr key={i} className="hover:bg-surface-2/50">
                     <td className="px-4 py-2.5 font-medium">{f.feature}</td>
                     <td className="px-4 py-2.5 text-muted">{f.category}</td>
@@ -269,7 +274,7 @@ export default function PricingPage() {
           <div className="border-t border-line p-5">
             <div className="text-[13px] font-semibold">Hourly reference</div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-              {HOURLY.map((h) => (
+              {hourly.map((h) => (
                 <div key={h.role} className="rounded-xl border border-line px-3 py-2.5">
                   <div className="text-[12.5px] text-muted">{h.role}</div>
                   <div className="text-[15px] font-semibold tabular-nums">₹{h.rate}<span className="text-[12px] font-normal text-subtle">/h</span></div>
@@ -282,11 +287,13 @@ export default function PricingPage() {
       )}
 
       {tab === "Care Plans" && (
+        <div className="space-y-3">
+        <div className="flex justify-end"><EditLink section="care" /></div>
         <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
-          {CARE.map((c, i) => (
+          {carePlans.map((c, i) => (
             <Card key={c.name} className={`flex flex-col p-5 ${i === 1 ? "border-accent ring-1 ring-accent" : ""}`}>
               <div className="flex items-center justify-between">
-                <div className="text-[13px] font-semibold capitalize">{c.name.toLowerCase()}</div>
+                <div className="text-[13px] font-semibold">{c.name}</div>
                 {i === 1 && <Badge tone="violet">Popular</Badge>}
               </div>
               <div className="mt-3 text-[24px] font-semibold tracking-tight tabular-nums">{inr(c.monthly)}<span className="text-[13px] font-normal text-subtle">/mo</span></div>
@@ -296,15 +303,18 @@ export default function PricingPage() {
             </Card>
           ))}
         </div>
+        </div>
       )}
 
       {tab === "Policies" && (
         <Card className="overflow-hidden">
+          <CardHeader title="Terms & policies" sub="Terms marked for quotes appear on every quotation." action={<EditLink section="terms" />} />
+          <div className="mt-4 border-t border-line" />
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-[13px]">
               <thead className="bg-surface-2 text-left text-[12px] text-muted"><tr><th className="px-4 py-2.5 font-medium">Policy</th><th className="px-4 py-2.5 font-medium">Standard</th><th className="px-4 py-2.5 font-medium">Internal detail</th><th className="px-4 py-2.5 font-medium">What the client sees</th></tr></thead>
               <tbody className="divide-y divide-line">
-                {POLICIES.map((p) => (
+                {policies.map((p) => (
                   <tr key={p.policy} className="align-top">
                     <td className="px-4 py-3 font-medium">{p.policy}</td>
                     <td className="px-4 py-3">{p.standard}</td>
@@ -321,6 +331,10 @@ export default function PricingPage() {
   );
 }
 
+function EditLink({ section }: { section: string }) {
+  return <Link href={`/settings?section=${section}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line px-2.5 text-[12.5px] font-medium text-muted hover:bg-surface-2 hover:text-ink"><Pencil size={12} /> Edit</Link>;
+}
+
 function Step({ n }: { n: number }) {
   return <span className="flex h-5 w-5 items-center justify-center rounded-full bg-ink text-[11px] font-semibold text-bg">{n}</span>;
 }
@@ -332,4 +346,8 @@ function Row({ k, v, big, tone }: { k: string; v: string; big?: boolean; tone?: 
       <span className="text-right font-medium tabular-nums">{v}</span>
     </div>
   );
+}
+
+export default function PricingPage() {
+  return <Suspense><PricingInner /></Suspense>;
 }

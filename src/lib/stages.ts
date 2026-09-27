@@ -1,4 +1,7 @@
-import type { LeadStage, Quote } from "./types";
+import type { LeadStage, Proposal, Quote } from "./types";
+
+export const proposalTone = (s: Proposal["status"]) =>
+  (s === "accepted" ? "green" : s === "sent" ? "amber" : s === "rejected" ? "red" : "neutral") as "green" | "amber" | "red" | "neutral";
 
 export const quoteTone = (s: Quote["status"]) =>
   (s === "accepted" ? "green" : s === "sent" ? "amber" : s === "rejected" || s === "expired" ? "red" : "neutral") as "green" | "amber" | "red" | "neutral";

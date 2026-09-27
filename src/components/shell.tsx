@@ -6,10 +6,10 @@ import {
   LayoutDashboard, Users, UserPlus, Layers, Package as Pkg, Calculator,
   FileText, Presentation, KanbanSquare, Repeat, Wallet, Wrench, LayoutTemplate,
   BarChart3, Settings, Search, Sun, Moon, Plus, Bell, Menu, X, CornerDownLeft,
-  ArrowRight, type LucideIcon,
+  ArrowRight, LogOut, AlertTriangle, type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useDB } from "@/lib/store";
+import { StoreProvider, useDB } from "@/lib/store";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
@@ -41,18 +41,32 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 ];
 const ALL_NAV = NAV_GROUPS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.label })));
 
-// Full-bleed pages rendered without the app chrome (login, client-facing documents).
-const isBare = (path: string) => path === "/login" || /^\/quotes\/[^/]+$/.test(path);
+// Pages without the app chrome: login, internal documents, public share links.
+const isBare = (path: string) => path === "/login" || /^\/(quotes|proposals)\/[^/]+$/.test(path);
 const isActive = (path: string, href: string) => path === href || (href !== "/" && path.startsWith(href + "/"));
 
-export function Shell({ children }: { children: React.ReactNode }) {
+// Public share pages never load the workspace store, so a client opening a
+// shared quote never downloads the studio's data.
+export function AppRoot({ children }: { children: React.ReactNode }) {
   const path = usePathname();
+  if (path.startsWith("/share/")) return <div className="min-h-screen bg-bg text-ink">{children}</div>;
+  return <StoreProvider><Shell>{children}</Shell></StoreProvider>;
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  const path = usePathname();
+  const router = useRouter();
+  const { sync } = useDB();
+  useEffect(() => {
+    if (sync === "locked" && path !== "/login") router.replace(`/login?next=${encodeURIComponent(path)}`);
+  }, [sync, path, router]);
   if (isBare(path)) return <div className="min-h-screen bg-bg text-ink">{children}</div>;
   return <AppChrome path={path}>{children}</AppChrome>;
 }
 
 function AppChrome({ path, children }: { path: string; children: React.ReactNode }) {
-  const { db, sync, backend, lastSyncedAt, refreshFromServer } = useDB();
+  const router = useRouter();
+  const { db, sync, backend, problem, lastSyncedAt, refreshFromServer, userName, logout } = useDB();
   const [dark, setDark] = useState(false);
   const [palette, setPalette] = useState(false);
   const [mobile, setMobile] = useState(false);
@@ -100,8 +114,9 @@ function AppChrome({ path, children }: { path: string; children: React.ReactNode
   const current = ALL_NAV.find((n) => isActive(path, n.href));
   const badge = (href: string) => (href === "/leads" ? openLeads : href === "/payments" ? overduePays : 0);
 
-  const syncLabel = sync === "synced" ? "Synced" : sync === "pulling" ? "Syncing…" : sync === "pushing" ? "Saving…" : sync === "error" ? "Sync error" : "Local only";
-  const syncDot = sync === "synced" ? "bg-emerald-500" : sync === "error" ? "bg-red-500" : sync === "local" ? "bg-subtle" : "bg-amber-500 animate-pulse";
+  const syncLabel = { synced: "All changes saved", pulling: "Syncing…", pushing: "Saving…", error: "Sync error — retry", local: "Offline — saved on this device", locked: "Sign in required", misconfigured: "Server not configured" }[sync];
+  const syncDot = sync === "synced" ? "bg-emerald-500" : sync === "error" || sync === "misconfigured" ? "bg-red-500" : sync === "local" || sync === "locked" ? "bg-subtle" : "bg-amber-500 animate-pulse";
+  const me = userName || db.settings.owner || "You";
 
   return (
     <div className="min-h-screen bg-bg text-ink">
@@ -161,19 +176,20 @@ function AppChrome({ path, children }: { path: string; children: React.ReactNode
           ))}
         </nav>
 
-        <div className="border-t border-line p-3">
+        <div className="flex items-center gap-1 border-t border-line p-3">
           <button
-            onClick={() => { if (sync === "error" || sync === "local") void refreshFromServer(); }}
-            title={lastSyncedAt ? `Last synced ${new Date(lastSyncedAt).toLocaleString()}${backend ? ` · ${backend}` : ""}` : "Server unreachable — working offline"}
-            className="flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition hover:bg-surface-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-2 text-[12px] font-semibold text-muted ring-1 ring-line">{(db.settings.owner || "K")[0]}</div>
+            onClick={() => { if (sync === "error" || sync === "local") void refreshFromServer(); else router.push("/settings"); }}
+            title={lastSyncedAt ? `Last synced ${new Date(lastSyncedAt).toLocaleString()}${backend ? ` · ${backend} storage` : ""}` : "Not synced yet"}
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-2 py-2 text-left transition hover:bg-surface-2">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-2 text-[12px] font-semibold text-muted ring-1 ring-line">{me[0]?.toUpperCase()}</div>
             <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate text-[13px] font-medium">{db.settings.owner || "Owner"}</div>
-              <div className="flex items-center gap-1.5 text-[11.5px] text-subtle">
-                <span className={cn("h-1.5 w-1.5 rounded-full", syncDot)} />{syncLabel}{backend && sync === "synced" ? ` · ${backend}` : ""}
+              <div className="truncate text-[13px] font-medium">{me}</div>
+              <div className="flex items-center gap-1.5 truncate text-[11.5px] text-subtle">
+                <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", syncDot)} />{syncLabel}
               </div>
             </div>
           </button>
+          <button onClick={logout} title="Sign out of this device" aria-label="Sign out" className="rounded-lg p-2 text-subtle transition hover:bg-surface-2 hover:text-ink"><LogOut size={15} /></button>
         </div>
       </aside>
 
@@ -217,6 +233,11 @@ function AppChrome({ path, children }: { path: string; children: React.ReactNode
             <button onClick={toggleTheme} className="rounded-xl p-2 text-muted hover:bg-surface-2 hover:text-ink" aria-label="Toggle theme">{dark ? <Sun size={17} /> : <Moon size={17} />}</button>
           </div>
         </header>
+        {problem && (
+          <div className="border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-[13px] text-amber-800 sm:px-8 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200">
+            <span className="inline-flex items-center gap-2 font-medium"><AlertTriangle size={14} /> Changes aren&apos;t being saved to the server.</span> {problem}
+          </div>
+        )}
         <main key={path} className="animate-fade-up mx-auto w-full max-w-[1240px] px-4 py-8 sm:px-8">{children}</main>
       </div>
 

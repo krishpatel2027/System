@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { backendMode } from "@/lib/server-store";
+import { authMode, backendMode, configProblem } from "@/lib/server-store";
 
 export async function GET() {
-  return NextResponse.json({
-    ok: true,
-    backend: backendMode(),
-    auth: process.env.ARKRIA_ADMIN_PASSWORD ? "password" : "open",
-    time: new Date().toISOString(),
-  });
+  const problem = configProblem();
+  return NextResponse.json(
+    { ok: !problem, backend: backendMode(), auth: authMode(), problem, time: new Date().toISOString() },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }

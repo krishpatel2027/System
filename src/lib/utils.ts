@@ -59,3 +59,10 @@ export function daysUntil(dateISO: string): number {
   const b = new Date(dateISO + "T00:00:00");
   return Math.round((b.getTime() - a.getTime()) / 86400000);
 }
+
+// 128-bit random token for public share links (works on plain-http LAN too).
+export function newShareToken(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}

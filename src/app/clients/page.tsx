@@ -73,7 +73,6 @@ function ClientsInner() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-[15px] font-semibold tracking-tight">{c.company}</span>
-                      {c.demo && <span className="rounded bg-surface-2 px-1 text-[9.5px] font-semibold tracking-wide text-subtle">DEMO</span>}
                     </div>
                     <div className="truncate text-[12.5px] text-muted">{[c.industry, c.location].filter(Boolean).join(" · ") || "—"}</div>
                   </div>

@@ -120,7 +120,6 @@ function LeadsInner() {
                             <div className="truncate text-[13.5px] font-semibold">{l.company}</div>
                             <div className="truncate text-[12px] text-muted">{l.contactName} · {l.service}</div>
                           </div>
-                          {l.demo && <span className="rounded bg-surface-2 px-1 text-[9.5px] font-semibold tracking-wide text-subtle">DEMO</span>}
                         </div>
                         <div className="mt-3 flex items-center justify-between text-[12px]">
                           <span className="font-semibold tabular-nums">{inr(leadValue(l))}</span>

@@ -93,14 +93,73 @@ export interface Service {
   active: boolean;
 }
 
-export interface Package {
+export interface PricePackage {
   id: string;
   name: string;
-  tagline: string;
+  price: number;
+  scope: string;
+  bestFor: string;
+  highlights: string;
+  positioning: string;
+  bundle: string[];
+  popular?: boolean;
+}
+
+export interface RateItem {
+  category: string;
+  feature: string;
+  unit: string;
+  entry: number;
+  standard: number;
+  premium: number;
+  notes: string;
+}
+
+export interface CarePlan {
+  name: string;
+  monthly: number;
+  hours: number;
+  desc: string;
+  bestFor: string;
+}
+
+export interface Policy {
+  policy: string;
+  standard: string;
+  details: string;
+  client: string;
+  onQuotes?: boolean;
+}
+
+export interface HourlyRate {
+  role: string;
+  rate: number;
   low: number;
-  high: number | null;
-  features: string[];
-  best?: boolean;
+  high: number;
+}
+
+export interface PricingConfig {
+  packages: PricePackage[];
+  features: RateItem[];
+  carePlans: CarePlan[];
+  policies: Policy[];
+  hourly: HourlyRate[];
+}
+
+export interface Settings {
+  studio: string;
+  owner: string;
+  email: string;
+  phone: string;
+  website: string;
+  address: string;
+  gstin: string;
+  upi: string;
+  bank: string;
+  quotePrefix: string;
+  defaultGst: number;
+  quoteValidityDays: number;
+  paymentTerms: string;
 }
 
 export interface QuoteItem {
@@ -123,6 +182,7 @@ export interface Quote {
   status: "draft" | "sent" | "accepted" | "rejected" | "expired";
   created: string;
   validUntil?: string;
+  shareToken?: string;
 }
 
 export interface Proposal {
@@ -144,6 +204,7 @@ export interface Proposal {
   terms: string;
   status: "draft" | "sent" | "accepted" | "rejected";
   created: string;
+  shareToken?: string;
 }
 
 export interface Task {
@@ -236,7 +297,6 @@ export interface DB {
   leads: Lead[];
   clients: Client[];
   services: Service[];
-  packages: Package[];
   quotes: Quote[];
   proposals: Proposal[];
   projects: Project[];
@@ -245,5 +305,7 @@ export interface DB {
   subs: MaintenanceSub[];
   templates: Template[];
   comms: Comm[];
-  settings: { studio: string; owner: string; email: string; phone: string; upi: string };
+  pricing: PricingConfig;
+  settings: Settings;
+  meta: { schema: number };
 }

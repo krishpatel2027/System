@@ -49,6 +49,9 @@ export function Metric({ label, value, sub, accent, icon }: { label: string; val
   );
 }
 
+// "in-progress" → "In-progress": capitalise only the first letter of plain-text labels.
+const sentence = (n: React.ReactNode) => (typeof n === "string" && n ? n[0].toUpperCase() + n.slice(1) : n);
+
 type Tone = "neutral" | "green" | "amber" | "red" | "blue" | "violet";
 const TONES: Record<Tone, string> = {
   neutral: "bg-surface-2 text-muted ring-line",
@@ -64,9 +67,9 @@ const DOTS: Record<Tone, string> = {
 
 export function Badge({ children, tone = "neutral", dot }: { children: React.ReactNode; tone?: Tone; dot?: boolean }) {
   return (
-    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-medium capitalize ring-1 ring-inset", TONES[tone])}>
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-medium ring-1 ring-inset", TONES[tone])}>
       {dot && <span className={cn("h-1.5 w-1.5 rounded-full", DOTS[tone])} />}
-      {children}
+      {sentence(children)}
     </span>
   );
 }
@@ -111,8 +114,8 @@ export function Tabs<T extends string>({ tabs, value, onChange, className }: { t
     <div className={cn("inline-flex items-center gap-0.5 rounded-xl border border-line bg-surface-2 p-0.5", className)}>
       {items.map((t) => (
         <button key={t.id} onClick={() => onChange(t.id)}
-          className={cn("rounded-[10px] px-3 py-1.5 text-[13px] font-medium capitalize transition", value === t.id ? "bg-surface text-ink shadow-sm ring-1 ring-line" : "text-muted hover:text-ink")}>
-          {t.label}
+          className={cn("rounded-[10px] px-3 py-1.5 text-[13px] font-medium transition", value === t.id ? "bg-surface text-ink shadow-sm ring-1 ring-line" : "text-muted hover:text-ink")}>
+          {sentence(t.label)}
         </button>
       ))}
     </div>

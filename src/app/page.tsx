@@ -6,6 +6,7 @@ import { inr, greeting, daysUntil, plural } from "@/lib/utils";
 import { OPEN_STAGES, leadValue } from "@/lib/stages";
 import { useHydrated } from "@/lib/use-hydrated";
 import { Card, CardHeader, Metric, Badge, PageHeader, Progress, Avatar } from "@/components/ui";
+import { GettingStarted } from "@/components/getting-started";
 import {
   ArrowRight, TrendingUp, Wallet, Clock, Repeat, Plus, PhoneCall, CalendarClock, MessageSquare,
 } from "lucide-react";
@@ -18,7 +19,7 @@ function relDays(d: number) {
 }
 
 export default function Dashboard() {
-  const { db } = useDB();
+  const { db, userName } = useDB();
   const hydrated = useHydrated();
   const todayLabel = hydrated ? new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" }) : " ";
   const hello = hydrated ? greeting() : "Welcome back";
@@ -56,7 +57,7 @@ export default function Dashboard() {
     <div className="space-y-8">
       <PageHeader
         eyebrow={todayLabel}
-        title={`${hello}, ${db.settings.owner || "there"}`}
+        title={`${hello}, ${(userName || db.settings.owner || "there").split(" ")[0]}`}
         description={overdueCount > 0
           ? `${overdueCount} item${overdueCount > 1 ? "s are" : " is"} overdue and ${agenda.length - overdueCount} more coming up this week.`
           : agenda.length > 0 ? `You're on track — ${agenda.length} item${agenda.length > 1 ? "s" : ""} coming up this week.` : "You're all caught up. A great time to chase new leads."}
@@ -65,6 +66,8 @@ export default function Dashboard() {
           <Link href="/quotes?action=new" className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3.5 text-[13.5px] font-medium text-accent-ink shadow-sm hover:opacity-90"><Plus size={15} /> New quote</Link>
         </>}
       />
+
+      <GettingStarted />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="Open pipeline" value={inr(pipelineValue)} sub={`${plural(openLeads.length, "active lead")}`} icon={<TrendingUp size={15} />} />

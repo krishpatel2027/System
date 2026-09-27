@@ -1,5 +1,5 @@
 "use client";
-import React, { Suspense, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useDB } from "@/lib/store";
@@ -19,60 +19,79 @@ const defaultItems = (): QuoteItem[] => [
   { id: uid("qi"), label: "Website development", qty: 1, price: 18000 },
 ];
 
+type Draft = { editingId: string | null; clientName: string; items: QuoteItem[]; discount: number; tax: number; notes: string; fromPricing: boolean };
+
+// Next number in the PREFIX-YEAR-NNN sequence, based on existing quotes.
+function nextQuoteNo(quotes: Quote[], prefix: string) {
+  const year = new Date().getFullYear();
+  const head = `${prefix || "Q"}-${year}-`;
+  const max = quotes.reduce((m, q) => (q.no.startsWith(head) ? Math.max(m, Number(q.no.slice(head.length)) || 0) : m), 0);
+  return `${head}${String(max + 1).padStart(3, "0")}`;
+}
+
 function QuotesInner() {
-  const { db, update } = useDB();
+  const { db, ready, update } = useDB();
   const router = useRouter();
   const params = useSearchParams();
-  const [open, setOpen] = useState(params.get("action") === "new");
+  const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
-  const [clientName, setClientName] = useState(db.clients[0]?.company ?? "");
-  const [items, setItems] = useState<QuoteItem[]>(defaultItems);
-  const [discount, setDiscount] = useState(0);
-  const [tax, setTax] = useState(18);
-  const [notes, setNotes] = useState("50% advance to begin · 30% at development milestone · 20% on launch.");
-  const [fromPricing, setFromPricing] = useState(false);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const handled = useRef(false);
+  const s = db.settings;
 
+  const blank = (): Draft => ({ editingId: null, clientName: "", items: defaultItems(), discount: 0, tax: s.defaultGst, notes: s.paymentTerms, fromPricing: false });
+  const openDraft = (d: Draft) => { setDraft(d); setOpen(true); };
+
+  // Deep links: ?action=new, ?from=pricing (calculator hand-off), ?edit=<id>.
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- intentional mount hydration from localStorage */
-    if (params.get("from") !== "pricing") return;
-    try {
-      const raw = localStorage.getItem(PENDING_KEY);
-      if (!raw) return;
-      const p = JSON.parse(raw) as { items: QuoteItem[]; discount: number };
-      if (p.items?.length) {
-        setItems(p.items);
-        setDiscount(p.discount ?? 0);
-        setFromPricing(true);
-        setOpen(true);
+    if (!ready || handled.current) return;
+    handled.current = true;
+    /* eslint-disable react-hooks/set-state-in-effect -- one-time deep-link handling once data is loaded */
+    const editId = params.get("edit");
+    const existing = editId ? db.quotes.find((q) => q.id === editId) : undefined;
+    if (existing) {
+      openDraft({ editingId: existing.id, clientName: existing.clientName, items: existing.items, discount: existing.discount, tax: existing.taxPct, notes: existing.notes ?? "", fromPricing: false });
+    } else if (params.get("from") === "pricing") {
+      try {
+        const p = JSON.parse(localStorage.getItem(PENDING_KEY) ?? "null") as { items: QuoteItem[]; discount: number } | null;
         localStorage.removeItem(PENDING_KEY);
-      }
-    } catch {}
+        if (p?.items?.length) openDraft({ ...blank(), items: p.items, discount: p.discount ?? 0, fromPricing: true });
+      } catch {}
+    } else if (params.get("action") === "new") {
+      openDraft(blank());
+    }
     /* eslint-enable react-hooks/set-state-in-effect */
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [ready]);
 
-  const t = quoteTotals({ items, discount, taxPct: tax });
   const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f, db.quotes.filter((q) => inFilter(q, f)).length])) as Record<Filter, number>, [db.quotes]);
   const quotes = db.quotes.filter((q) => inFilter(q, filter));
   const acceptedValue = db.quotes.filter((q) => q.status === "accepted").reduce((a, q) => a + quoteTotals(q).total, 0);
   const openValue = db.quotes.filter((q) => q.status === "sent").reduce((a, q) => a + quoteTotals(q).total, 0);
 
-  const setItem = (id: string, patch: Partial<QuoteItem>) => setItems((xs) => xs.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  const set = (p: Partial<Draft>) => setDraft((d) => (d ? { ...d, ...p } : d));
+  const setItem = (id: string, patch: Partial<QuoteItem>) => setDraft((d) => (d ? { ...d, items: d.items.map((x) => (x.id === id ? { ...x, ...patch } : x)) } : d));
+  const close = () => { setOpen(false); if (params.toString()) router.replace("/quotes"); };
 
-  const save = (status: Quote["status"]) => {
-    if (!clientName.trim()) return alert("Choose or type a client name.");
-    if (items.length === 0) return alert("Add at least one line item.");
-    const client = db.clients.find((c) => c.company === clientName.trim());
-    const id = uid("q");
-    const year = new Date().getFullYear();
-    const no = `ARK-${year}-${String(db.quotes.length + 15).padStart(3, "0")}`;
-    update("quotes", [{ id, no, clientId: client?.id, clientName: clientName.trim(), items, discount, taxPct: tax, notes, status, created: todayISO(), validUntil: addDaysISO(14) }, ...db.quotes]);
+  const save = (status?: Quote["status"]) => {
+    if (!draft) return;
+    const name = draft.clientName.trim();
+    if (!name) return alert("Choose or type a client name.");
+    if (draft.items.length === 0) return alert("Add at least one line item.");
+    const client = db.clients.find((c) => c.company === name);
+    const fields = { clientId: client?.id, clientName: name, items: draft.items, discount: draft.discount, taxPct: draft.tax, notes: draft.notes };
+    let id = draft.editingId;
+    if (id) {
+      update("quotes", db.quotes.map((q) => (q.id === id ? { ...q, ...fields, ...(status ? { status } : {}) } : q)));
+    } else {
+      id = uid("q");
+      update("quotes", [{ id, no: nextQuoteNo(db.quotes, s.quotePrefix), ...fields, status: status ?? "draft", created: todayISO(), validUntil: addDaysISO(s.quoteValidityDays || 14) }, ...db.quotes]);
+    }
     setOpen(false);
-    setItems(defaultItems());
-    setDiscount(0);
-    setFromPricing(false);
     router.push(`/quotes/${id}`);
   };
+
+  const t = quoteTotals({ items: draft?.items ?? [], discount: draft?.discount ?? 0, taxPct: draft?.tax ?? 0 });
 
   return (
     <div className="space-y-6">
@@ -81,12 +100,12 @@ function QuotesInner() {
         description={`${inr(openValue)} awaiting response · ${inr(acceptedValue)} accepted`}
         actions={<>
           <Link href="/pricing" className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-line bg-surface px-3.5 text-[13.5px] font-medium hover:bg-surface-2"><Calculator size={14} /> Price a project</Link>
-          <Btn onClick={() => setOpen(true)}><Plus size={15} /> New quote</Btn>
+          <Btn onClick={() => openDraft(blank())}><Plus size={15} /> New quote</Btn>
         </>}
       />
 
       {db.quotes.length === 0 ? (
-        <Empty icon={<FileText size={18} />} title="No quotes yet" sub="Build a quote from scratch, or price a project in the calculator and send it here." action={<Btn onClick={() => setOpen(true)}><Plus size={15} /> New quote</Btn>} />
+        <Empty icon={<FileText size={18} />} title="No quotes yet" sub="Build a quote from scratch, or price a project in the calculator and send it here." action={<Btn onClick={() => openDraft(blank())}><Plus size={15} /> New quote</Btn>} />
       ) : (
         <>
           <Tabs value={filter} onChange={setFilter}
@@ -127,58 +146,62 @@ function QuotesInner() {
         </>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New quotation" wide
+      <Modal open={open && !!draft} onClose={close} title={draft?.editingId ? "Edit quotation" : "New quotation"} wide
         footer={<>
-          <Btn variant="ghost" onClick={() => setOpen(false)}>Cancel</Btn>
-          <Btn variant="outline" onClick={() => save("draft")}>Save draft</Btn>
-          <Btn onClick={() => save("sent")}>Save & mark sent</Btn>
+          <Btn variant="ghost" onClick={close}>Cancel</Btn>
+          {draft?.editingId ? <Btn onClick={() => save()}>Save changes</Btn> : <>
+            <Btn variant="outline" onClick={() => save("draft")}>Save draft</Btn>
+            <Btn onClick={() => save("sent")}>Save & mark sent</Btn>
+          </>}
         </>}>
-        <div className="space-y-5">
-          {fromPricing && (
-            <div className="flex items-center gap-2 rounded-xl border border-accent-line bg-accent-soft px-3 py-2 text-[13px]">
-              <Sparkles size={14} className="text-accent" /> Prefilled from the pricing calculator.
-            </div>
-          )}
-          <Field label="Client" hint="Pick an existing client or type a new name">
-            <input list="quote-clients" className={inputCls} value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Client name" />
-            <datalist id="quote-clients">{db.clients.map((c) => <option key={c.id} value={c.company} />)}</datalist>
-          </Field>
-
-          <div>
-            <div className="mb-1.5 grid grid-cols-[1fr_64px_120px_32px] gap-2 text-[12px] font-medium text-muted">
-              <span>Deliverable</span><span>Qty</span><span>Price (₹)</span><span />
-            </div>
-            <div className="space-y-2">
-              {items.map((it) => (
-                <div key={it.id} className="grid grid-cols-[1fr_64px_120px_32px] items-center gap-2">
-                  <input className={inputCls} value={it.label} onChange={(e) => setItem(it.id, { label: e.target.value })} />
-                  <input type="number" min={1} className={inputCls} value={it.qty} onChange={(e) => setItem(it.id, { qty: Number(e.target.value) })} />
-                  <input type="number" min={0} className={inputCls} value={it.price} onChange={(e) => setItem(it.id, { price: Number(e.target.value) })} />
-                  <button aria-label="Remove item" className="flex h-9 w-8 items-center justify-center rounded-lg text-subtle hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950" onClick={() => setItems(items.filter((x) => x.id !== it.id))}><Trash2 size={14} /></button>
-                </div>
-              ))}
-            </div>
-            <button className="mt-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft" onClick={() => setItems([...items, { id: uid("qi"), label: "", qty: 1, price: 0 }])}>
-              <Plus size={14} /> Add line item
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-[1fr_260px]">
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Discount (₹)"><input type="number" min={0} className={inputCls} value={discount} onChange={(e) => setDiscount(Number(e.target.value))} /></Field>
-                <Field label="GST %"><input type="number" min={0} className={inputCls} value={tax} onChange={(e) => setTax(Number(e.target.value))} /></Field>
+        {draft && (
+          <div className="space-y-5">
+            {draft.fromPricing && (
+              <div className="flex items-center gap-2 rounded-xl border border-accent-line bg-accent-soft px-3 py-2 text-[13px]">
+                <Sparkles size={14} className="text-accent" /> Prefilled from the pricing calculator.
               </div>
-              <Field label="Terms shown to client"><textarea rows={2} className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+            )}
+            <Field label="Client" hint="Pick an existing client or type a new name">
+              <input list="quote-clients" autoFocus className={inputCls} value={draft.clientName} onChange={(e) => set({ clientName: e.target.value })} placeholder="Client name" />
+              <datalist id="quote-clients">{db.clients.map((c) => <option key={c.id} value={c.company} />)}</datalist>
+            </Field>
+
+            <div>
+              <div className="mb-1.5 grid grid-cols-[1fr_64px_120px_32px] gap-2 text-[12px] font-medium text-muted">
+                <span>Deliverable</span><span>Qty</span><span>Price (₹)</span><span />
+              </div>
+              <div className="space-y-2">
+                {draft.items.map((it) => (
+                  <div key={it.id} className="grid grid-cols-[1fr_64px_120px_32px] items-center gap-2">
+                    <input className={inputCls} value={it.label} onChange={(e) => setItem(it.id, { label: e.target.value })} placeholder="What you'll deliver" />
+                    <input type="number" min={1} className={inputCls} value={it.qty} onChange={(e) => setItem(it.id, { qty: Number(e.target.value) })} />
+                    <input type="number" min={0} className={inputCls} value={it.price} onChange={(e) => setItem(it.id, { price: Number(e.target.value) })} />
+                    <button aria-label="Remove item" className="flex h-9 w-8 items-center justify-center rounded-lg text-subtle hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950" onClick={() => set({ items: draft.items.filter((x) => x.id !== it.id) })}><Trash2 size={14} /></button>
+                  </div>
+                ))}
+              </div>
+              <button className="mt-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft" onClick={() => set({ items: [...draft.items, { id: uid("qi"), label: "", qty: 1, price: 0 }] })}>
+                <Plus size={14} /> Add line item
+              </button>
             </div>
-            <div className="h-fit rounded-xl bg-surface-2 p-4 text-[13px]">
-              <Line k="Subtotal" v={inr(t.subtotal)} />
-              {t.discount > 0 && <Line k="Discount" v={`− ${inr(t.discount)}`} />}
-              <Line k={`GST ${tax}%`} v={inr(t.tax)} />
-              <div className="mt-2 flex items-center justify-between border-t border-line-strong pt-2 text-[15px] font-semibold"><span>Total</span><span className="tabular-nums">{inr(t.total)}</span></div>
+
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-[1fr_260px]">
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Discount (₹)"><input type="number" min={0} className={inputCls} value={draft.discount} onChange={(e) => set({ discount: Number(e.target.value) })} /></Field>
+                  <Field label="GST %"><input type="number" min={0} className={inputCls} value={draft.tax} onChange={(e) => set({ tax: Number(e.target.value) })} /></Field>
+                </div>
+                <Field label="Payment terms shown to client"><textarea rows={2} className={inputCls} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} /></Field>
+              </div>
+              <div className="h-fit rounded-xl bg-surface-2 p-4 text-[13px]">
+                <Line k="Subtotal" v={inr(t.subtotal)} />
+                {t.discount > 0 && <Line k="Discount" v={`− ${inr(t.discount)}`} />}
+                <Line k={`GST ${draft.tax}%`} v={inr(t.tax)} />
+                <div className="mt-2 flex items-center justify-between border-t border-line-strong pt-2 text-[15px] font-semibold"><span>Total</span><span className="tabular-nums">{inr(t.total)}</span></div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </Modal>
     </div>
   );

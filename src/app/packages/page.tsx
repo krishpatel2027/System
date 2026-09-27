@@ -1,102 +1,76 @@
 "use client";
-import React, { useState } from "react";
-import { useDB } from "@/lib/store";
-import { inr, uid } from "@/lib/utils";
-import { Card, Badge, Btn, Modal, Field, inputCls } from "@/components/ui";
-import { Plus } from "lucide-react";
+import React from "react";
 import Link from "next/link";
-import type { Package } from "@/lib/types";
-
-const emptyPkg = { name: "", tagline: "", low: 15000, high: 30000 as number | null, features: "", best: false };
+import { useDB } from "@/lib/store";
+import { inr } from "@/lib/utils";
+import { packageBundle } from "@/lib/pricing-data";
+import { Card, Badge, Btn, PageHeader } from "@/components/ui";
+import { Check, Pencil, Printer, ArrowRight, Wrench } from "lucide-react";
 
 export default function PackagesPage() {
-  const { db, update } = useDB();
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [form, setForm] = useState(emptyPkg);
-
-  const startNew = () => {
-    setEditing(null);
-    setForm(emptyPkg);
-    setOpen(true);
-  };
-
-  const startEdit = (p: Package) => {
-    setEditing(p.id);
-    setForm({ name: p.name, tagline: p.tagline, low: p.low, high: p.high, features: p.features.join(", "), best: !!p.best });
-    setOpen(true);
-  };
-
-  const save = () => {
-    if (!form.name.trim()) return alert("Name required");
-    const features = form.features.split(",").map((f) => f.trim()).filter(Boolean);
-    if (editing) {
-      update(
-        "packages",
-        db.packages.map((p) =>
-          p.id === editing ? { ...p, name: form.name, tagline: form.tagline, low: form.low, high: form.high, features, best: form.best } : form.best ? { ...p, best: false } : p
-        )
-      );
-    } else {
-      update("packages", [
-        ...(form.best ? db.packages.map((p) => ({ ...p, best: false })) : db.packages),
-        { id: uid("p"), name: form.name, tagline: form.tagline, low: form.low, high: form.high, features, best: form.best },
-      ]);
-    }
-    setOpen(false);
-  };
-
-  const remove = (id: string) => {
-    if (!confirm("Delete this package?")) return;
-    update("packages", db.packages.filter((p) => p.id !== id));
-  };
+  const { db } = useDB();
+  const { packages, carePlans } = db.pricing;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-[22px] font-semibold tracking-tight">Packages</h1><p className="text-[13px] text-neutral-500">Client-facing ranges. Complexity &gt; page count.</p></div>
-        <Btn onClick={startNew}><Plus size={15} /> New Package</Btn>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {[...db.packages].sort((a, b) => a.low - b.low).map((p, i, arr) => {
-          const prev = i > 0 ? arr[i - 1] : null;
+    <div className="space-y-8">
+      <PageHeader
+        title="Packages"
+        description="Your offer at a glance — walk clients through it, or print it as a one-page price sheet."
+        actions={<>
+          <Link href="/settings?section=packages" className="no-print inline-flex h-9 items-center gap-1.5 rounded-xl border border-line bg-surface px-3.5 text-[13.5px] font-medium hover:bg-surface-2"><Pencil size={14} /> Edit packages</Link>
+          <Btn variant="outline" onClick={() => window.print()} className="no-print"><Printer size={14} /> Print</Btn>
+          <Link href="/pricing" className="no-print inline-flex h-9 items-center gap-1.5 rounded-xl bg-ink px-3.5 text-[13.5px] font-medium text-bg shadow-sm hover:opacity-90">Price a project <ArrowRight size={14} /></Link>
+        </>}
+      />
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        {packages.map((p, i) => {
+          const prev = i > 0 ? packages[i - 1].name : null;
+          const bundled = packageBundle(packages, p.id).length;
+          const highlights = p.highlights.split(",").map((h) => h.trim()).filter(Boolean);
           return (
-          <Card key={p.id} className={`p-6 ${p.best ? "ring-2 ring-neutral-900 dark:ring-white" : ""}`}>
-            {p.best && <Badge tone="green">MOST POPULAR</Badge>}
-            <div className="mt-2 text-[16px] font-bold tracking-tight">{p.name}</div>
-            <div className="text-[13px] text-neutral-500">{p.tagline}</div>
-            <div className="mt-3 text-[22px] font-semibold">{inr(p.low)} – {p.high ? inr(p.high) : "Custom"}{p.high && p.high >= 150000 ? "+" : ""}</div>
-            {prev && <div className="mt-2 rounded-lg bg-emerald-50 px-2 py-1 text-[12px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">✓ Everything in {prev.name} +</div>}
-            <ul className="mt-3 space-y-1.5">
-              {p.features.map((f) => <li key={f} className="flex gap-2 text-[13px]"><span className="text-emerald-500">✓</span>{f}</li>)}
-            </ul>
-            <div className="mt-2 text-[12px] text-neutral-400">Lower-tier basics bundled — never charged separately. Only the difference is quoted.</div>
-            <div className="mt-4 flex gap-2">
-              <Link href="/quotes?action=new" className="flex-1 rounded-xl border border-neutral-200 py-2 text-center text-[13px] font-medium hover:bg-neutral-50 dark:border-neutral-700">Use in Quote →</Link>
-              <button onClick={() => startEdit(p)} className="rounded-xl border border-neutral-200 px-3 py-2 text-[13px] font-medium hover:bg-neutral-50 dark:border-neutral-700">Edit</button>
-              <button onClick={() => remove(p.id)} className="rounded-xl px-2 py-2 text-[13px] text-red-500 hover:bg-red-50">✕</button>
-            </div>
-          </Card>
+            <Card key={p.id} className={`relative flex flex-col p-5 ${p.popular ? "border-accent ring-1 ring-accent" : ""}`}>
+              {p.popular && <div className="absolute -top-2.5 left-5"><Badge tone="violet">Most popular</Badge></div>}
+              <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-subtle">{p.positioning}</div>
+              <div className="mt-1 text-[17px] font-semibold tracking-tight">{p.name}</div>
+              <div className="mt-3 text-[12px] text-muted">Starting at</div>
+              <div className="text-[26px] font-semibold tracking-[-0.02em] tabular-nums">{inr(p.price)}</div>
+              <div className="mt-1 text-[12.5px] text-muted">{p.scope}</div>
+              <p className="mt-3 text-[12.5px] text-muted">Best for {p.bestFor.charAt(0).toLowerCase() + p.bestFor.slice(1)}</p>
+              <div className="my-4 h-px bg-line" />
+              {prev && <div className="mb-2 text-[12.5px] font-medium">Everything in {prev}, plus:</div>}
+              <ul className="flex-1 space-y-1.5">
+                {highlights.map((h) => (
+                  <li key={h} className="flex gap-2 text-[13px]"><Check size={14} className="mt-0.5 shrink-0 text-accent" />{h}</li>
+                ))}
+              </ul>
+              <div className="mt-4 text-[11.5px] text-subtle">{bundled} essentials included at no extra cost</div>
+              <Link href={`/pricing?package=${p.id}`} className="no-print mt-4 inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-line text-[13px] font-medium hover:bg-surface-2">Build a quote</Link>
+            </Card>
           );
         })}
       </div>
-      <Card className="p-5 text-[13.5px] text-neutral-600 dark:text-neutral-300">
-        <span className="font-semibold text-neutral-900 dark:text-white">Pricing philosophy — </span>
-        Indian SMBs stay affordable; premium custom work is priced on scope + complexity + customization + responsibility. A 4-page Three.js/GSAP/AI site can cost more than a 15-page corporate site.
-      </Card>
-      <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit Package" : "New Package"}>
-        <div className="grid gap-3">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Name"><input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="ARKRIA GROW" /></Field>
-            <Field label="Tagline"><input className={inputCls} value={form.tagline} onChange={(e) => setForm({ ...form, tagline: e.target.value })} placeholder="Credibility + lead generation" /></Field>
-            <Field label="Range low (₹)"><input type="number" className={inputCls} value={form.low} onChange={(e) => setForm({ ...form, low: Number(e.target.value) })} /></Field>
-            <Field label="Range high (₹, empty = Custom)"><input type="number" className={inputCls} value={form.high ?? ""} onChange={(e) => setForm({ ...form, high: e.target.value === "" ? null : Number(e.target.value) })} placeholder="Leave empty for Custom" /></Field>
+
+      {carePlans.length > 0 && (
+        <section>
+          <div className="mb-4 flex items-center gap-2">
+            <Wrench size={16} className="text-subtle" />
+            <h2 className="text-[17px] font-semibold tracking-tight">After launch: care plans</h2>
           </div>
-          <Field label="Features (comma separated)"><textarea rows={3} className={inputCls} value={form.features} onChange={(e) => setForm({ ...form, features: e.target.value })} placeholder="5–8 pages, Custom UI/UX, CMS, …" /></Field>
-          <label className="flex items-center gap-2 text-[13.5px]"><input type="checkbox" checked={form.best} onChange={(e) => setForm({ ...form, best: e.target.checked })} className="h-4 w-4" /> Mark as most popular</label>
-        </div>
-        <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setOpen(false)}>Cancel</Btn><Btn onClick={save}>Save</Btn></div>
-      </Modal>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {carePlans.map((c) => (
+              <Card key={c.name} className="p-4">
+                <div className="text-[13.5px] font-semibold">{c.name}</div>
+                <div className="mt-1 text-[20px] font-semibold tabular-nums">{inr(c.monthly)}<span className="text-[12px] font-normal text-subtle">/mo</span></div>
+                <div className="text-[12px] text-muted">Up to {c.hours}h support</div>
+                <p className="mt-2 text-[12.5px] leading-relaxed text-muted">{c.desc}</p>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <p className="text-[12px] text-subtle">Prices exclude GST. Third-party costs (hosting, domains, paid plugins, APIs) are billed separately.</p>
     </div>
   );
 }
