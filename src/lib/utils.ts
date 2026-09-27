@@ -19,6 +19,17 @@ export function inr(n: number): string {
   return `${sign}₹${formatted.replace("-", "")}`;
 }
 
+export function quoteTotals(q: { items: { qty: number; price: number }[]; discount: number; taxPct: number }) {
+  const subtotal = q.items.reduce((a, i) => a + i.qty * i.price, 0);
+  const taxable = Math.max(0, subtotal - (q.discount || 0));
+  const tax = (taxable * (q.taxPct || 0)) / 100;
+  return { subtotal, discount: q.discount || 0, taxable, tax, total: taxable + tax };
+}
+
+export function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
 export function uid(prefix = "id"): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random()
     .toString(36)

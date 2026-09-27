@@ -40,6 +40,7 @@ function authHeaders(): Record<string, string> {
 
 const Ctx = createContext<{
   db: DB;
+  ready: boolean;
   update: <K extends keyof DB>(key: K, val: DB[K]) => void;
   reset: () => void;
   sync: SyncState;
@@ -140,6 +141,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(
     () => ({
       db,
+      ready,
       update: <K extends keyof DB>(key: K, val: DB[K]) => {
         setDb((d) => ({ ...d, [key]: val }));
       },
@@ -166,7 +168,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       },
     }),
-    [db, sync, backend, lastSyncedAt]
+    [db, ready, sync, backend, lastSyncedAt]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -1,28 +1,37 @@
 "use client";
-import React, { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { useDB } from "@/lib/store";
-import { inr, uid, todayISO, addDaysISO } from "@/lib/utils";
-import { Card, Badge, Btn, Empty, Modal, Field, inputCls } from "@/components/ui";
-import { Plus, Printer } from "lucide-react";
+import { inr, uid, todayISO, addDaysISO, quoteTotals } from "@/lib/utils";
+import { quoteTone } from "@/lib/stages";
+import { Badge, Btn, Empty, Modal, Field, inputCls, PageHeader, Tabs, Avatar } from "@/components/ui";
+import { Plus, FileText, Trash2, Calculator, Sparkles, ArrowUpRight } from "lucide-react";
 import type { Quote, QuoteItem } from "@/lib/types";
 import { PENDING_KEY } from "@/app/pricing/_studio";
 
+const FILTERS = ["all", "draft", "sent", "accepted", "closed"] as const;
+type Filter = (typeof FILTERS)[number];
+const inFilter = (q: Quote, f: Filter) => f === "all" || (f === "closed" ? q.status === "rejected" || q.status === "expired" : q.status === f);
+
+const defaultItems = (): QuoteItem[] => [
+  { id: uid("qi"), label: "Website strategy & UI/UX design", qty: 1, price: 8000 },
+  { id: uid("qi"), label: "Website development", qty: 1, price: 18000 },
+];
+
 function QuotesInner() {
   const { db, update } = useDB();
+  const router = useRouter();
   const params = useSearchParams();
   const [open, setOpen] = useState(params.get("action") === "new");
-  const [view, setView] = useState<Quote | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
   const [clientName, setClientName] = useState(db.clients[0]?.company ?? "");
-  const [items, setItems] = useState<QuoteItem[]>([
-    { id: uid("qi"), label: "Website Strategy & UI/UX", qty: 1, price: 8000 },
-    { id: uid("qi"), label: "Website Development", qty: 1, price: 18000 },
-  ]);
+  const [items, setItems] = useState<QuoteItem[]>(defaultItems);
   const [discount, setDiscount] = useState(0);
-  const [tax, setTax] = useState(0);
+  const [tax, setTax] = useState(18);
+  const [notes, setNotes] = useState("50% advance to begin · 30% at development milestone · 20% on launch.");
   const [fromPricing, setFromPricing] = useState(false);
 
-  // Hydrate a pending pricing-studio payload once on mount (intentional mount hydration).
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- intentional mount hydration from localStorage */
     if (params.get("from") !== "pricing") return;
@@ -34,6 +43,7 @@ function QuotesInner() {
         setItems(p.items);
         setDiscount(p.discount ?? 0);
         setFromPricing(true);
+        setOpen(true);
         localStorage.removeItem(PENDING_KEY);
       }
     } catch {}
@@ -41,88 +51,143 @@ function QuotesInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const sub = items.reduce((a, i) => a + i.qty * i.price, 0);
-  const total = sub - discount + (sub * tax) / 100;
+  const t = quoteTotals({ items, discount, taxPct: tax });
+  const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f, db.quotes.filter((q) => inFilter(q, f)).length])) as Record<Filter, number>, [db.quotes]);
+  const quotes = db.quotes.filter((q) => inFilter(q, filter));
+  const acceptedValue = db.quotes.filter((q) => q.status === "accepted").reduce((a, q) => a + quoteTotals(q).total, 0);
+  const openValue = db.quotes.filter((q) => q.status === "sent").reduce((a, q) => a + quoteTotals(q).total, 0);
+
+  const setItem = (id: string, patch: Partial<QuoteItem>) => setItems((xs) => xs.map((x) => (x.id === id ? { ...x, ...patch } : x)));
 
   const save = (status: Quote["status"]) => {
-    if (!clientName.trim()) return alert("Client required");
-    const no = `ARK-2026-${String(db.quotes.length + 15).padStart(3, "0")}`;
-    update("quotes", [{ id: uid("q"), no, clientName, items, discount, taxPct: tax, status, created: todayISO(), validUntil: addDaysISO(14) }, ...db.quotes]);
+    if (!clientName.trim()) return alert("Choose or type a client name.");
+    if (items.length === 0) return alert("Add at least one line item.");
+    const client = db.clients.find((c) => c.company === clientName.trim());
+    const id = uid("q");
+    const year = new Date().getFullYear();
+    const no = `ARK-${year}-${String(db.quotes.length + 15).padStart(3, "0")}`;
+    update("quotes", [{ id, no, clientId: client?.id, clientName: clientName.trim(), items, discount, taxPct: tax, notes, status, created: todayISO(), validUntil: addDaysISO(14) }, ...db.quotes]);
     setOpen(false);
+    setItems(defaultItems());
+    setDiscount(0);
+    setFromPricing(false);
+    router.push(`/quotes/${id}`);
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-[22px] font-semibold tracking-tight">Quotes</h1><p className="text-[13px] text-neutral-500">Grouped deliverables — never line-item internals</p></div>
-        <Btn onClick={() => setOpen(true)}><Plus size={15} /> New Quote</Btn>
-      </div>
-      {db.quotes.length === 0 && <Empty title="No quotes yet" sub="Build your first client-facing quote." action={<Btn onClick={() => setOpen(true)}>+ New Quote</Btn>} />}
-      <div className="grid gap-3 md:grid-cols-2">
-        {db.quotes.map((q) => {
-          const t = q.items.reduce((a, i) => a + i.qty * i.price, 0) - q.discount;
-          return (
-            <Card key={q.id} className="cursor-pointer p-5" >
-              <div onClick={() => setView(q)}>
-                <div className="flex items-center justify-between"><span className="font-mono text-[13px]">{q.no}</span><Badge tone={q.status === "accepted" ? "green" : q.status === "sent" ? "amber" : "neutral"}>{q.status}</Badge></div>
-                <div className="mt-1 text-[15px] font-semibold">{q.clientName}</div>
-                <div className="text-[13px] text-neutral-500">{q.items.length} deliverables · {q.created}</div>
-                <div className="mt-2 text-[18px] font-semibold">{inr(t)}</div>
-              </div>
-            </Card>
-          );
-        })}
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Quotes"
+        description={`${inr(openValue)} awaiting response · ${inr(acceptedValue)} accepted`}
+        actions={<>
+          <Link href="/pricing" className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-line bg-surface px-3.5 text-[13.5px] font-medium hover:bg-surface-2"><Calculator size={14} /> Price a project</Link>
+          <Btn onClick={() => setOpen(true)}><Plus size={15} /> New quote</Btn>
+        </>}
+      />
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New Quotation" wide>
-        {fromPricing && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-[13px] text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">✓ Prefilled from Pricing Calculator — grouped deliverables, internals hidden.</div>}
-        <div className="grid gap-3">
-          <Field label="Client"><select className={inputCls} value={clientName} onChange={(e) => setClientName(e.target.value)}>{db.clients.map(c=><option key={c.id} value={c.company}>{c.company}</option>)}<option value="New Client">+ New Client…</option></select></Field>
-          {items.map((it) => (
-            <div key={it.id} className="grid grid-cols-[1fr_70px_110px_32px] gap-2">
-              <input className={inputCls} value={it.label} onChange={(e) => setItems(items.map((x) => (x.id === it.id ? { ...x, label: e.target.value } : x)))} />
-              <input type="number" className={inputCls} value={it.qty} onChange={(e) => setItems(items.map((x) => (x.id === it.id ? { ...x, qty: Number(e.target.value) } : x)))} />
-              <input type="number" className={inputCls} value={it.price} onChange={(e) => setItems(items.map((x) => (x.id === it.id ? { ...x, price: Number(e.target.value) } : x)))} />
-              <button className="text-red-500" onClick={() => setItems(items.filter((x) => x.id !== it.id))}>✕</button>
+      {db.quotes.length === 0 ? (
+        <Empty icon={<FileText size={18} />} title="No quotes yet" sub="Build a quote from scratch, or price a project in the calculator and send it here." action={<Btn onClick={() => setOpen(true)}><Plus size={15} /> New quote</Btn>} />
+      ) : (
+        <>
+          <Tabs value={filter} onChange={setFilter}
+            tabs={FILTERS.map((f) => ({ id: f, label: <span className="flex items-center gap-1.5">{f}<span className="text-[11px] text-subtle">{counts[f]}</span></span> }))} />
+          <div className="overflow-hidden rounded-2xl border border-line bg-surface">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-[13px]">
+                <thead>
+                  <tr className="border-b border-line bg-surface-2/60 text-left text-[12px] text-muted">
+                    <th className="px-4 py-2.5 font-medium">Client</th>
+                    <th className="px-4 py-2.5 font-medium">Quote</th>
+                    <th className="px-4 py-2.5 font-medium">Status</th>
+                    <th className="px-4 py-2.5 font-medium">Created</th>
+                    <th className="px-4 py-2.5 font-medium">Valid until</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Total</th>
+                    <th className="w-10" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {quotes.map((q) => (
+                    <tr key={q.id} onClick={() => router.push(`/quotes/${q.id}`)} className="group cursor-pointer transition hover:bg-surface-2/60">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3"><Avatar name={q.clientName} className="h-8 w-8 text-[11px]" /><span className="font-medium">{q.clientName}</span></div>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-[12.5px] text-muted">{q.no}</td>
+                      <td className="px-4 py-3"><Badge tone={quoteTone(q.status)} dot>{q.status}</Badge></td>
+                      <td className="px-4 py-3 text-muted">{q.created}</td>
+                      <td className="px-4 py-3 text-muted">{q.validUntil ?? "—"}</td>
+                      <td className="px-4 py-3 text-right font-semibold tabular-nums">{inr(quoteTotals(q).total)}</td>
+                      <td className="px-3 py-3 text-subtle"><ArrowUpRight size={15} className="opacity-0 transition group-hover:opacity-100" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ))}
-          <button className="text-left text-[13px] font-medium text-neutral-600" onClick={() => setItems([...items, { id: uid("qi"), label: "New deliverable", qty: 1, price: 5000 }])}>+ Add item</button>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Discount (₹)"><input type="number" className={inputCls} value={discount} onChange={(e) => setDiscount(Number(e.target.value))} /></Field>
-            <Field label="Tax %"><input type="number" className={inputCls} value={tax} onChange={(e) => setTax(Number(e.target.value))} /></Field>
+            {quotes.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No {filter} quotes.</div>}
           </div>
-          <div className="rounded-xl bg-neutral-50 p-3 text-[14px] dark:bg-neutral-800">Subtotal {inr(sub)} · Discount {inr(discount)} · <b>Total {inr(total)}</b></div>
-        </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <Btn variant="ghost" onClick={() => save("draft")}>Save Draft</Btn>
-          <Btn onClick={() => save("sent")}>Mark Sent</Btn>
-        </div>
-      </Modal>
+        </>
+      )}
 
-      <Modal open={!!view} onClose={() => setView(null)} title={view ? `Quotation ${view.no}` : ""} wide>
-        {view && (
+      <Modal open={open} onClose={() => setOpen(false)} title="New quotation" wide
+        footer={<>
+          <Btn variant="ghost" onClick={() => setOpen(false)}>Cancel</Btn>
+          <Btn variant="outline" onClick={() => save("draft")}>Save draft</Btn>
+          <Btn onClick={() => save("sent")}>Save & mark sent</Btn>
+        </>}>
+        <div className="space-y-5">
+          {fromPricing && (
+            <div className="flex items-center gap-2 rounded-xl border border-accent-line bg-accent-soft px-3 py-2 text-[13px]">
+              <Sparkles size={14} className="text-accent" /> Prefilled from the pricing calculator.
+            </div>
+          )}
+          <Field label="Client" hint="Pick an existing client or type a new name">
+            <input list="quote-clients" className={inputCls} value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Client name" />
+            <datalist id="quote-clients">{db.clients.map((c) => <option key={c.id} value={c.company} />)}</datalist>
+          </Field>
+
           <div>
-            <div className="flex items-center justify-between">
-              <div><div className="text-[18px] font-bold">Arkria × {view.clientName}</div><div className="text-[13px] text-neutral-500">{view.created} · valid till {view.validUntil}</div></div>
-              <div className="flex gap-2">
-                <select className={inputCls} value={view.status} onChange={(e) => { const ns = e.target.value as Quote["status"]; update("quotes", db.quotes.map((x) => (x.id === view.id ? { ...x, status: ns } : x))); setView({ ...view, status: ns }); }}>
-                  {(["draft","sent","accepted","rejected","expired"] as const).map(s=><option key={s} value={s}>{s}</option>)}
-                </select>
-                <Btn variant="outline" onClick={() => window.print()}><Printer size={14} /> PDF</Btn>
-              </div>
+            <div className="mb-1.5 grid grid-cols-[1fr_64px_120px_32px] gap-2 text-[12px] font-medium text-muted">
+              <span>Deliverable</span><span>Qty</span><span>Price (₹)</span><span />
             </div>
-            <table className="mt-4 w-full text-[13.5px]">
-              <tbody>
-                {view.items.map((i) => <tr key={i.id} className="border-b border-neutral-100 dark:border-neutral-800"><td className="py-2">{i.label} × {i.qty}</td><td className="py-2 text-right">{inr(i.qty * i.price)}</td></tr>)}
-                <tr><td className="py-2 text-neutral-500">Discount</td><td className="py-2 text-right">− {inr(view.discount)}</td></tr>
-                <tr><td className="py-2 font-semibold">TOTAL</td><td className="py-2 text-right font-semibold">{inr(view.items.reduce((a,i)=>a+i.qty*i.price,0) - view.discount)}</td></tr>
-              </tbody>
-            </table>
-            <p className="mt-3 text-[12.5px] text-neutral-500">Payment: 50% advance · 30% milestone · 20% launch. {db.settings.upi && `UPI: ${db.settings.upi}`}</p>
+            <div className="space-y-2">
+              {items.map((it) => (
+                <div key={it.id} className="grid grid-cols-[1fr_64px_120px_32px] items-center gap-2">
+                  <input className={inputCls} value={it.label} onChange={(e) => setItem(it.id, { label: e.target.value })} />
+                  <input type="number" min={1} className={inputCls} value={it.qty} onChange={(e) => setItem(it.id, { qty: Number(e.target.value) })} />
+                  <input type="number" min={0} className={inputCls} value={it.price} onChange={(e) => setItem(it.id, { price: Number(e.target.value) })} />
+                  <button aria-label="Remove item" className="flex h-9 w-8 items-center justify-center rounded-lg text-subtle hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950" onClick={() => setItems(items.filter((x) => x.id !== it.id))}><Trash2 size={14} /></button>
+                </div>
+              ))}
+            </div>
+            <button className="mt-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft" onClick={() => setItems([...items, { id: uid("qi"), label: "", qty: 1, price: 0 }])}>
+              <Plus size={14} /> Add line item
+            </button>
           </div>
-        )}
+
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-[1fr_260px]">
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Discount (₹)"><input type="number" min={0} className={inputCls} value={discount} onChange={(e) => setDiscount(Number(e.target.value))} /></Field>
+                <Field label="GST %"><input type="number" min={0} className={inputCls} value={tax} onChange={(e) => setTax(Number(e.target.value))} /></Field>
+              </div>
+              <Field label="Terms shown to client"><textarea rows={2} className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+            </div>
+            <div className="h-fit rounded-xl bg-surface-2 p-4 text-[13px]">
+              <Line k="Subtotal" v={inr(t.subtotal)} />
+              {t.discount > 0 && <Line k="Discount" v={`− ${inr(t.discount)}`} />}
+              <Line k={`GST ${tax}%`} v={inr(t.tax)} />
+              <div className="mt-2 flex items-center justify-between border-t border-line-strong pt-2 text-[15px] font-semibold"><span>Total</span><span className="tabular-nums">{inr(t.total)}</span></div>
+            </div>
+          </div>
+        </div>
       </Modal>
     </div>
   );
 }
-export default function QuotesPage() { return <Suspense><QuotesInner /></Suspense>; }
+
+function Line({ k, v }: { k: string; v: string }) {
+  return <div className="flex items-center justify-between py-1 text-muted"><span>{k}</span><span className="tabular-nums text-ink">{v}</span></div>;
+}
+
+export default function QuotesPage() {
+  return <Suspense><QuotesInner /></Suspense>;
+}

@@ -21,13 +21,14 @@ npm run lint
 
 | Route | What it does |
 |---|---|
-| `/` | Dashboard: follow-ups, pipeline, payments, deadlines |
+| `/` | Dashboard: KPIs, pipeline, this week's follow-ups/payments/milestones |
 | `/leads` | Lead pipeline (kanban) + audit + estimates |
 | `/clients` | Clients + onboarding checklist |
 | `/services` | Internal cost vs client price |
 | `/packages` | Client-facing packages (full CRUD) |
-| `/pricing` | Pricing Studio: 143-feature calculator, margin/contingency/rush/discount/GST → send to Quote Builder |
-| `/quotes` | Quote builder (receives Pricing Studio payloads) |
+| `/pricing` | Pricing calculator: package + extras + discount/GST → create quote; rate card, care plans, policies |
+| `/quotes` | Quotes list + builder (receives Pricing calculator payloads) |
+| `/quotes/[id]` | Client-facing quotation document — share the link or print to PDF |
 | `/proposals` | Proposal documents |
 | `/projects` | Projects: tasks, milestones, progress |
 | `/scope` | Scope-change control (quote before building) |
