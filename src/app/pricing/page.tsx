@@ -3,113 +3,99 @@ import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { inr, uid } from "@/lib/utils";
 import { Card, Btn, Field, inputCls, Badge } from "@/components/ui";
-import { ArrowRight, Copy, Download, Save, FolderOpen, RotateCcw, Printer } from "lucide-react";
+import { ArrowRight, Copy, Download, Save, FolderOpen, Check } from "lucide-react";
 import {
   FEATURES, CALC_PACKAGES, HOURLY, CARE, POLICIES,
-  PACKAGE_ORDER, getPackageIncluded, TYPE_PRESETS, TYPE_CATEGORIES,
+  PACKAGE_ORDER, getPackageIncluded, TYPE_PRESETS,
 } from "@/lib/pricing-data";
 import { PENDING_KEY, PRICING_SAVE_KEY as SAVE_KEY } from "./_studio";
 import type { QuoteItem } from "@/lib/types";
 
-const TABS = ["Calculator", "Packages", "Rate Card", "Care Plans", "Policies"] as const;
+const TABS = ["Calculator", "Rate Card", "Care Plans", "Policies"] as const;
+const DEFAULT_PKG = "Business";
 
 export default function PricingPage() {
   const router = useRouter();
   const [tab, setTab] = useState<(typeof TABS)[number]>("Calculator");
 
-  const [projectType, setProjectType] = useState("Website 5–8 pages");
-  const [pkg, setPkg] = useState("Business");
+  const [pkg, setPkg] = useState(DEFAULT_PKG);
+  const [quickStart, setQuickStart] = useState("");
   const [discount, setDiscount] = useState(0);
   const [gst, setGst] = useState(18);
-
-  // Extra features: simple on/off list at standard price. Bundled basics
-  // start ticked automatically and are never charged separately.
-  const [sel, setSel] = useState<Record<number, boolean>>(() => {
-    const init: Record<number, boolean> = {};
-    const bundle = new Set(getPackageIncluded("Business"));
-    FEATURES.forEach((f, i) => {
-      if (bundle.has(f.feature)) init[i] = true;
-    });
-    return init;
-  });
   const [q, setQ] = useState("");
-  const [showAll, setShowAll] = useState(false);
 
-  const relevantCats = useMemo(() => TYPE_CATEGORIES[projectType] ?? [], [projectType]);
-  const visible = useMemo(
-    () =>
-      FEATURES.map((f, i) => ({ ...f, i })).filter(
-        (f) =>
-          (!q || `${f.feature} ${f.category} ${f.notes}`.toLowerCase().includes(q.toLowerCase())) &&
-          (showAll || q.trim() !== "" || relevantCats.length === 0 || relevantCats.includes(f.category))
-      ),
-    [q, showAll, relevantCats]
-  );
+  // User-picked extras only — never the current package's bundled basics.
+  // Bundled items are always ₹0 and always shown checked, purely from
+  // includedSet(pkg); they're never written into sel, so switching to a
+  // cheaper package can't turn yesterday's "included" into today's "extra".
+  const [sel, setSel] = useState<Set<string>>(new Set());
 
   const includedSet = useMemo(() => new Set(getPackageIncluded(pkg)), [pkg]);
-  const isIncluded = (featureName: string) => includedSet.has(featureName);
 
-  const applyPackage = (name: string) => {
+  const choosePackage = (name: string) => {
     setPkg(name);
-    const bundle = new Set(getPackageIncluded(name));
-    setSel((prev) => {
-      const next = { ...prev };
-      FEATURES.forEach((f, i) => {
-        if (bundle.has(f.feature)) next[i] = true;
-      });
-      return next;
-    });
+    setQuickStart("");
   };
 
-  // Switching product type applies its preset: suggested package + relevant
-  // features. Extras the user already picked are preserved.
-  const applyProjectType = (name: string) => {
-    setProjectType(name);
-    setQ("");
+  const applyQuickStart = (name: string) => {
+    setQuickStart(name);
     const preset = TYPE_PRESETS[name];
     if (!preset) return;
     setPkg(preset.pkg);
-    const bundle = new Set(getPackageIncluded(preset.pkg));
-    const wanted = new Set([...bundle, ...preset.features]);
+    setSel((prev) => new Set([...prev, ...preset.features]));
+  };
+
+  const toggleFeature = (name: string) => {
+    if (includedSet.has(name)) return; // bundled — locked on, not user-toggleable
     setSel((prev) => {
-      const next = { ...prev };
-      FEATURES.forEach((f, i) => {
-        if (wanted.has(f.feature)) next[i] = true;
-      });
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
       return next;
     });
   };
+
+  const categories = useMemo(() => [...new Set(FEATURES.map((f) => f.category))], []);
+  const grouped = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const filtered = needle
+      ? FEATURES.filter((f) => `${f.feature} ${f.category} ${f.notes}`.toLowerCase().includes(needle))
+      : FEATURES;
+    return categories
+      .map((c) => ({ category: c, items: filtered.filter((f) => f.category === c) }))
+      .filter((g) => g.items.length > 0);
+  }, [categories, q]);
 
   const calc = useMemo(() => {
     const pkgObj = CALC_PACKAGES.find((p) => p.name === pkg);
     const base = pkgObj?.price ?? 0;
-    const extraIdx = FEATURES.map((f, i) => i).filter((i) => sel[i] && !includedSet.has(FEATURES[i].feature));
-    const includedIdx = FEATURES.map((f, i) => i).filter((i) => sel[i] && includedSet.has(FEATURES[i].feature));
-    const extras = extraIdx.reduce((s, i) => s + FEATURES[i].standard, 0);
-    const subtotal = base + extras;
+    const extras = [...sel].filter((name) => !includedSet.has(name));
+    const included = [...includedSet];
+    const extrasTotal = extras.reduce((s, name) => s + (FEATURES.find((f) => f.feature === name)?.standard ?? 0), 0);
+    const subtotal = base + extrasTotal;
     const disc = (subtotal * discount) / 100;
     const beforeGST = subtotal - disc;
     const gstAmt = (beforeGST * gst) / 100;
     const total = beforeGST + gstAmt;
     const rounded = Math.round(beforeGST / 1000) * 1000;
 
-    const extraNames = extraIdx.map((i) => `• ${FEATURES[i].feature}`);
-    const includedNames = includedIdx.map((i) => `• ${FEATURES[i].feature} (Included)`);
     const quoteText =
-      `Investment — ${inr(rounded)}\nProject: ${projectType}\nIncludes\n• ${pkgObj?.scope ?? ""}\n• Custom responsive design & development\n` +
-      `${includedNames.join("\n")}${includedNames.length ? "\n" : ""}` +
-      `${extraNames.join("\n") || "• Selected scope/features"}\n` +
+      `Investment — ${inr(rounded)}\n` +
+      `Package: ${pkgObj?.name ?? pkg} — ${pkgObj?.scope ?? ""}\n` +
+      `Includes\n• Custom responsive design & development\n` +
+      `${included.map((n) => `• ${n} (Included)`).join("\n")}${included.length ? "\n" : ""}` +
+      `${extras.map((n) => `• ${n}`).join("\n") || "• Selected scope/features"}\n` +
       `• SEO / performance foundations as scoped\n• Deployment\n` +
       `Third-party subscriptions and usage-based services are billed separately unless explicitly included.\n\n` +
       `GST @ ${gst}%: ${inr(gstAmt)}\nClient total incl. GST: ${inr(total)}`;
 
-    return { base, extras, subtotal, disc, beforeGST, gstAmt, total, rounded, extraCount: extraIdx.length, includedCount: includedIdx.length, quoteText, pkgObj, extraIdx, includedIdx };
-  }, [pkg, projectType, sel, discount, gst, includedSet]);
+    return { base, extras, included, extrasTotal, subtotal, disc, beforeGST, gstAmt, total, rounded, quoteText, pkgObj };
+  }, [pkg, sel, discount, gst, includedSet]);
 
   const sendToQuote = () => {
     const items: QuoteItem[] = [
       { id: uid("qi"), label: `${calc.pkgObj?.name ?? pkg} package — ${calc.pkgObj?.scope ?? ""}`, qty: 1, price: calc.base },
-      ...calc.extraIdx.map((i) => ({ id: uid("qi"), label: FEATURES[i].feature, qty: 1, price: FEATURES[i].standard })),
+      ...calc.extras.map((name) => ({ id: uid("qi"), label: name, qty: 1, price: FEATURES.find((f) => f.feature === name)?.standard ?? 0 })),
     ];
     try {
       localStorage.setItem(PENDING_KEY, JSON.stringify({ items, discount: Math.round(calc.disc), note: `GST extra` }));
@@ -119,7 +105,7 @@ export default function PricingPage() {
 
   const saveProject = () => {
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ projectType, package: pkg, discount, gst, selected: sel }));
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ package: pkg, discount, gst, selected: [...sel] }));
       alert("Project saved in this browser.");
     } catch {}
   };
@@ -128,13 +114,10 @@ export default function PricingPage() {
       const raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return alert("No saved project found.");
       const s = JSON.parse(raw);
-      setProjectType(s.projectType); setDiscount(s.discount ?? 0); setGst(s.gst ?? 18);
-      const bundle = new Set(getPackageIncluded(s.package ?? pkg));
-      const merged: Record<number, boolean> = { ...(s.selected ?? {}) };
-      FEATURES.forEach((f, i) => {
-        if (bundle.has(f.feature)) merged[i] = true;
-      });
-      setPkg(s.package); setSel(merged);
+      setPkg(s.package ?? DEFAULT_PKG);
+      setDiscount(s.discount ?? 0);
+      setGst(s.gst ?? 18);
+      setSel(new Set(s.selected ?? []));
       alert("Saved project loaded.");
     } catch {}
   };
@@ -143,13 +126,12 @@ export default function PricingPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-[22px] font-semibold tracking-tight">Pricing Studio</h1>
-          <p className="text-[13px] text-neutral-500">Pick a project type and package, add extras, done.</p>
+          <h1 className="text-[22px] font-semibold tracking-tight">Pricing Calculator</h1>
+          <p className="text-[13px] text-neutral-500">Pick a package, tick extras, get a client-ready quote.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Btn variant="outline" onClick={saveProject}><Save size={14} /> Save</Btn>
           <Btn variant="outline" onClick={loadProject}><FolderOpen size={14} /> Load</Btn>
-          <Btn variant="outline" onClick={() => window.print()}><Printer size={14} /> PDF</Btn>
           <Btn onClick={sendToQuote}>Send to Quote <ArrowRight size={14} /></Btn>
         </div>
       </div>
@@ -164,38 +146,67 @@ export default function PricingPage() {
         <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
           <div className="space-y-3">
             <Card className="p-5">
-              <div className="text-[14px] font-semibold">Project</div>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <Field label="Project type"><select className={inputCls} value={projectType} onChange={(e) => applyProjectType(e.target.value)}>{Object.keys(TYPE_PRESETS).map((p) => <option key={p}>{p}</option>)}</select></Field>
-                <Field label="Package"><select className={inputCls} value={pkg} onChange={(e) => applyPackage(e.target.value)}>{CALC_PACKAGES.map((p) => <option key={p.name}>{p.name}</option>)}</select></Field>
-                <Field label={`Discount — ${discount}%`}><input type="range" min={0} max={20} value={discount} onChange={(e) => setDiscount(Number(e.target.value))} className="mt-2 w-full" /></Field>
-                <Field label={`GST — ${gst}%`}><input type="range" min={0} max={28} value={gst} onChange={(e) => setGst(Number(e.target.value))} className="mt-2 w-full" /></Field>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[14px] font-semibold">1. Package</div>
+                <select className={`${inputCls} !w-auto text-[12.5px]`} value={quickStart} onChange={(e) => applyQuickStart(e.target.value)}>
+                  <option value="">Quick start by project type (optional)…</option>
+                  {Object.keys(TYPE_PRESETS).map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
               </div>
-              <p className="mt-2 text-[12px] text-neutral-500">Switching project type sets a starting package and ticks its typical features. Change the package or extras any time.</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                {CALC_PACKAGES.map((p) => {
+                  const idx = PACKAGE_ORDER.indexOf(p.name);
+                  const prev = idx > 0 ? PACKAGE_ORDER[idx - 1] : null;
+                  const active = pkg === p.name;
+                  return (
+                    <button key={p.name} onClick={() => choosePackage(p.name)} className={`rounded-xl border p-3 text-left transition ${active ? "border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900" : "border-neutral-200 hover:border-neutral-400 dark:border-neutral-700"}`}>
+                      <div className={`text-[10px] uppercase tracking-widest ${active ? "opacity-70" : "text-neutral-400"}`}>{p.positioning}</div>
+                      <div className="text-[14px] font-bold">{p.name}</div>
+                      <div className="text-[18px] font-bold">{inr(p.price)}+</div>
+                      <div className={`text-[11.5px] ${active ? "opacity-80" : "text-neutral-500"}`}>{p.scope}</div>
+                      {prev && <div className={`mt-1 text-[10.5px] ${active ? "opacity-80" : "text-neutral-400"}`}>+ everything in {prev}</div>}
+                      {active && <div className="mt-1 flex items-center gap-1 text-[11px] font-semibold"><Check size={12} /> Selected</div>}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-[12px] text-neutral-500">{getPackageIncluded(pkg).length} basics are bundled into {pkg} at no extra charge — see them marked <b className="text-emerald-600">Included</b> below.</p>
             </Card>
 
             <Card className="p-5">
-              <div className="text-[14px] font-semibold">Extras <span className="font-normal text-neutral-400">— {calc.extraCount} added on top of {pkg}</span></div>
-              <p className="mt-1 text-[12px] text-neutral-500">Basics already in <b>{pkg}</b> are marked <span className="font-semibold text-emerald-600">Included</span> — ₹0, never charged again. Tick anything else to add it.</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search features…" className={`${inputCls} min-w-[220px] flex-1`} />
-                <Btn variant="outline" onClick={() => setShowAll(!showAll)}>{showAll ? "Relevant only" : `Show all ${FEATURES.length}`}</Btn>
+              <div className="text-[14px] font-semibold">2. Extras <span className="font-normal text-neutral-400">— {calc.extras.length} added on top of {pkg}</span></div>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search features…" className={`${inputCls} mt-3`} />
+              <div className="mt-3 max-h-[480px] space-y-3 overflow-auto pr-1">
+                {grouped.map((g) => (
+                  <div key={g.category}>
+                    <div className="sticky top-0 bg-white px-1 py-1 text-[10.5px] font-bold uppercase tracking-wider text-neutral-400 dark:bg-neutral-900">{g.category}</div>
+                    <div className="divide-y divide-neutral-100 rounded-xl border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-700">
+                      {g.items.map((f) => {
+                        const bundled = includedSet.has(f.feature);
+                        const checked = bundled || sel.has(f.feature);
+                        return (
+                          <label key={f.feature} className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 ${bundled ? "cursor-default bg-emerald-50/60 dark:bg-emerald-950/20" : "cursor-pointer"}`}>
+                            <input type="checkbox" checked={checked} disabled={bundled} title={bundled ? `Bundled in ${pkg} — always included` : "Add as paid extra"} onChange={() => toggleFeature(f.feature)} className="h-4 w-4 accent-emerald-600 disabled:opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-[13px] font-semibold">{f.feature} {bundled && <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300">INCLUDED</span>}</div>
+                              <div className="truncate text-[11.5px] text-neutral-500">{f.notes}</div>
+                            </div>
+                            <div className="shrink-0 text-[13px] font-semibold">{bundled ? "₹0" : inr(f.standard)}</div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {grouped.length === 0 && <div className="p-6 text-center text-[13px] text-neutral-500">No features match &ldquo;{q}&rdquo;.</div>}
               </div>
-              <div className="mt-3 max-h-[520px] divide-y divide-neutral-100 overflow-auto rounded-xl border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-700">
-                {visible.map((f) => {
-                  const bundled = isIncluded(f.feature);
-                  return (
-                    <label key={f.i} className={`flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 ${bundled && sel[f.i] ? "bg-emerald-50/60 dark:bg-emerald-950/20" : ""}`}>
-                      <input type="checkbox" checked={!!sel[f.i]} title={bundled ? `Bundled in ${pkg}` : "Add as paid extra"} onChange={(e) => setSel({ ...sel, [f.i]: e.target.checked })} className="h-4 w-4 accent-emerald-600" />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[13px] font-semibold">{f.feature} {bundled && <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300">INCLUDED</span>}</div>
-                        <div className="truncate text-[11.5px] text-neutral-500">{f.category} · {f.notes}</div>
-                      </div>
-                      <div className="shrink-0 text-[13px] font-semibold">{bundled ? "₹0" : inr(f.standard)}</div>
-                    </label>
-                  );
-                })}
-                {visible.length === 0 && <div className="p-6 text-center text-[13px] text-neutral-500">No features match "{q}".</div>}
+            </Card>
+
+            <Card className="p-5">
+              <div className="text-[14px] font-semibold">3. Discount &amp; GST</div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <Field label="Discount %"><input type="number" min={0} max={100} className={inputCls} value={discount} onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))} /></Field>
+                <Field label="GST %"><input type="number" min={0} max={28} className={inputCls} value={gst} onChange={(e) => setGst(Math.max(0, Number(e.target.value) || 0))} /></Field>
               </div>
             </Card>
           </div>
@@ -206,8 +217,8 @@ export default function PricingPage() {
             <div className="text-[12px] text-neutral-500">before GST · rounded for presentation</div>
             <div className="mt-2 space-y-0 text-[13px]">
               <Row k={`${pkg} package`} v={inr(calc.base)} />
-              <Row k={`Extras (${calc.extraCount})`} v={inr(calc.extras)} />
-              {calc.includedCount > 0 && <Row k={`Bundled in ${pkg} (${calc.includedCount})`} v="₹0 Included" tone="text-emerald-600" />}
+              <Row k={`Extras (${calc.extras.length})`} v={inr(calc.extrasTotal)} />
+              {calc.included.length > 0 && <Row k={`Bundled in ${pkg} (${calc.included.length})`} v="₹0 Included" tone="text-emerald-600" />}
               <Row k="Subtotal" v={inr(calc.subtotal)} />
               <Row k={`Discount ${discount}%`} v={"− " + inr(calc.disc)} />
               <Row k="Before GST" v={inr(calc.beforeGST)} />
@@ -227,36 +238,9 @@ export default function PricingPage() {
         </div>
       )}
 
-      {tab === "Packages" && (
-        <div>
-          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
-            {CALC_PACKAGES.map((p) => {
-              const idx = PACKAGE_ORDER.indexOf(p.name);
-              const prev = idx > 0 ? PACKAGE_ORDER[idx - 1] : null;
-              return (
-              <Card key={p.name} className={`p-4 ${pkg === p.name ? "ring-2 ring-neutral-900 dark:ring-white" : ""}`}>
-                <div className="text-[10.5px] uppercase tracking-widest text-neutral-400">{p.positioning}</div>
-                <div className="text-[15px] font-bold">{p.name}</div>
-                <div className="text-[20px] font-bold">{inr(p.price)}+</div>
-                <div className="text-[12px] text-neutral-500">{p.scope}</div>
-                {prev && <div className="mt-1 rounded-lg bg-emerald-50 px-2 py-1 text-[11.5px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">✓ Everything in {prev} +</div>}
-                <p className="mt-1 text-[12px]"><b>Best for:</b> {p.bestFor}</p>
-                <ul className="mt-1 list-disc pl-4 text-[12px] text-neutral-600 dark:text-neutral-300">{p.included.split(", ").map((x) => <li key={x}>{x}</li>)}</ul>
-                <div className="mt-1 text-[11.5px] text-neutral-400">{getPackageIncluded(p.name).length} basics bundled · extras only on top</div>
-                <Btn variant="outline" className="mt-2 w-full" onClick={() => { applyPackage(p.name); setTab("Calculator"); }}>Use package</Btn>
-              </Card>
-              );
-            })}
-          </div>
-          <Card className="mt-3 border-indigo-200 bg-indigo-50/50 p-4 text-[13px] dark:bg-indigo-950/30"><b>Positioning rule:</b> each tier includes every lower tier&apos;s basics at no extra charge. Only the difference is priced.</Card>
-        </div>
-      )}
-
       {tab === "Rate Card" && (
         <Card className="p-5">
-          <div className="flex flex-wrap gap-2">
-            <Badge>{FEATURES.length} rows · standard tier shown</Badge>
-          </div>
+          <Badge>{FEATURES.length} rows · standard tier shown</Badge>
           <p className="mt-1 text-[12px] text-neutral-500">Internal starting prices — not client-facing line-item promises.</p>
           <div className="mt-2 max-h-[65vh] overflow-auto">
             <table className="w-full text-[12.5px]">
@@ -292,10 +276,6 @@ export default function PricingPage() {
           </table>
         </Card>
       )}
-
-      <div className="flex gap-2">
-        <Btn variant="outline" onClick={() => setTab("Calculator")}><RotateCcw size={14} /> Back to Calculator</Btn>
-      </div>
     </div>
   );
 }
