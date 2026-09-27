@@ -1,13 +1,5 @@
 import type { DB } from "./types";
 
-export const MAINT_PLANS = [
-  { name: "BASIC", monthly: 2500, hours: 2, desc: "Backups, updates, minor fixes, basic monitoring" },
-  { name: "STANDARD", monthly: 5000, hours: 5, desc: "Updates, monitoring, content edits, minor improvements" },
-  { name: "GROWTH", monthly: 9000, hours: 10, desc: "Maintenance, SEO, performance, content, improvements" },
-  { name: "PRO", monthly: 15000, hours: 20, desc: "Priority support, continuous improvements, dev hours" },
-  { name: "DEDICATED", monthly: 25000, hours: 40, desc: "Dedicated capacity, priority support, continuous dev" },
-];
-
 export const ONBOARDING_ITEMS = [
   "Logo received",
   "Brand assets received",
@@ -226,7 +218,7 @@ export const seedDB: DB = {
     { id: "tm1", category: "WhatsApp", title: "First Contact", body: "Hi {{name}}, this is Krish from Arkria — we build premium websites for real-estate brands. Saw {{company}} — quick idea to lift enquiries. Open to a 15-min call?" },
     { id: "tm2", category: "Follow-up", title: "Follow-up 1 (2 days)", body: "Hi {{name}}, just bumping the proposal for {{company}} ({{amount}}). Happy to walk through scope on a quick call. — Krish, Arkria" },
     { id: "tm3", category: "Email", title: "Proposal Sent", body: "Subject: Arkria × {{company}} — proposal inside\n\nHi {{name}},\n\nAttached is the proposal: scope, timeline and investment ({{amount}}). Valid till {{date}}.\n\nNext step: 20-min review call?\n\n— Krish" },
-    { id: "tm4", category: "Payment", title: "Payment Reminder", body: "Hi {{name}}, friendly reminder: {{label}} of {{amount}} was due {{date}}. UPI: ... Reply once done and I'll confirm instantly. — Arkria" },
+    { id: "tm4", category: "Payment", title: "Payment Reminder", body: "Hi {{name}}, friendly reminder: {{label}} of {{amount}} was due {{date}}. UPI: {{upi}}. Reply once done and I'll confirm instantly. — Arkria" },
     { id: "tm5", category: "Project", title: "Project Started", body: "Hi {{name}}, advance received — your project is now active. Onboarding checklist: logo, content, accesses. Let's launch strong. — Arkria" },
     { id: "tm6", category: "Maintenance", title: "Maintenance Offer", body: "Hi {{name}}, your site is live. To keep it fast + safe, our CARE plans start ₹2,500/mo. Want me to activate STANDARD for {{company}}?" },
   ],

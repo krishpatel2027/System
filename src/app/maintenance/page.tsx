@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { useDB } from "@/lib/store";
 import { inr, uid, addDaysISO } from "@/lib/utils";
-import { MAINT_PLANS } from "@/lib/seed";
+import { MAINT_PLANS } from "@/lib/pricing-data";
 import { Card, Badge, Btn, Modal, Field, inputCls } from "@/components/ui";
 import { Plus } from "lucide-react";
 
