@@ -31,19 +31,23 @@ const serverless = () => !!(process.env.VERCEL || process.env.NETLIFY || process
 export function configProblem(): string | null {
   if (backendMode() === "file" && serverless())
     return "This host has no persistent disk. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (see README → Deploy).";
-  if (process.env.NODE_ENV === "production" && !process.env.ARKRIA_ADMIN_PASSWORD && process.env.ARKRIA_ALLOW_OPEN !== "true")
+  if (process.env.NODE_ENV === "production" && !teamPassword() && process.env.ARKRIA_ALLOW_OPEN !== "true")
     return "ARKRIA_ADMIN_PASSWORD is not set. Set a team password before using this deployment (see README → Deploy).";
   return null;
 }
 
+// Trimmed: a stray space or newline pasted into .env or a hosting dashboard
+// would otherwise make the password impossible to type.
+const teamPassword = () => (process.env.ARKRIA_ADMIN_PASSWORD ?? "").trim();
+
 export function authMode(): "password" | "open" {
-  return process.env.ARKRIA_ADMIN_PASSWORD ? "password" : "open";
+  return teamPassword() ? "password" : "open";
 }
 
 export function requireToken(req: Request): boolean {
-  const expected = process.env.ARKRIA_ADMIN_PASSWORD;
+  const expected = teamPassword();
   if (!expected) return true;
-  const given = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "");
+  const given = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "").trim();
   const a = Buffer.from(given);
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);

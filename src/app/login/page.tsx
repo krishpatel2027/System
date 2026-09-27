@@ -25,11 +25,12 @@ function LoginInner() {
     e?.preventDefault();
     setStatus("checking");
     try {
-      const res = await fetch("/api/store", { headers: password ? { Authorization: `Bearer ${password}` } : {}, cache: "no-store" });
+      const pw = password.trim();
+      const res = await fetch("/api/store", { headers: pw ? { Authorization: `Bearer ${pw}` } : {}, cache: "no-store" });
       if (res.status === 401) return setStatus("wrong");
       if (!res.ok && res.status !== 503) return setStatus("error");
       localStorage.setItem(NAME_KEY, name.trim());
-      if (password) localStorage.setItem(TOKEN_KEY, password);
+      if (pw) localStorage.setItem(TOKEN_KEY, pw);
       window.location.href = next.startsWith("/") ? next : "/";
     } catch {
       setStatus("error");
