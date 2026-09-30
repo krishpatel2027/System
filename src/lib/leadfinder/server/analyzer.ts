@@ -1,122 +1,15 @@
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
 import { parse, type HTMLElement } from "node-html-parser";
 import type { Finding, WebsiteAudit } from "../../types";
+import { AnalyzeError, guardedFetch, normalizeUrl, readCapped as readBody, robotsCheck } from "../../audit/server/net";
 
 // Reads a business's public homepage and reports what's missing, with evidence.
 // Only the homepage and robots.txt are requested, as an identified bot, and a
 // robots.txt disallow is honoured. Private/internal addresses are refused.
 
-export const USER_AGENT = "ArkriaAuditBot/1.0 (+website quality check; one page per request)";
-const MAX_BYTES = 2_000_000;
-const TIMEOUT = 12_000;
+export { AnalyzeError, normalizeUrl, robotsAllows, USER_AGENT } from "../../audit/server/net";
 
-export class AnalyzeError extends Error {}
-
-export function normalizeUrl(input: string): URL {
-  const raw = input.trim();
-  if (!raw || raw.length > 2000) throw new AnalyzeError("Enter a website address.");
-  if (/^[a-z][\w+.-]*:\/\//i.test(raw) && !/^https?:\/\//i.test(raw)) throw new AnalyzeError("Only http and https websites can be checked.");
-  let u: URL;
-  try { u = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`); } catch { throw new AnalyzeError("That doesn't look like a website address."); }
-  if (!/^https?:$/.test(u.protocol)) throw new AnalyzeError("Only http and https websites can be checked.");
-  if (u.username || u.password) throw new AnalyzeError("Website addresses with credentials aren't allowed.");
-  u.hash = "";
-  return u;
-}
-
-function privateIp(ip: string): boolean {
-  if (isIP(ip) === 6) {
-    const v = ip.toLowerCase();
-    if (v === "::1" || v === "::" || v.startsWith("fc") || v.startsWith("fd") || v.startsWith("fe80")) return true;
-    const m = v.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    return m ? privateIp(m[1]) : false;
-  }
-  const [a, b] = ip.split(".").map(Number);
-  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
-}
-
-// In production every hop is checked so a redirect can't reach internal services.
-async function guardHost(u: URL) {
-  if (process.env.NODE_ENV !== "production" && process.env.ARKRIA_ANALYZER_ALLOW_PRIVATE !== "false") return;
-  const host = u.hostname.replace(/^\[|\]$/g, "");
-  if (/^(localhost|.*\.local|.*\.internal)$/i.test(host)) throw new AnalyzeError("Internal addresses can't be checked.");
-  const addrs = isIP(host) ? [{ address: host }] : await lookup(host, { all: true }).catch(() => { throw new AnalyzeError(`Couldn't find ${host} (DNS lookup failed).`); });
-  if (addrs.some((a) => privateIp(a.address))) throw new AnalyzeError("Internal addresses can't be checked.");
-}
-
-async function get(u: URL, accept: string): Promise<{ res: Response; url: URL }> {
-  let url = u;
-  for (let hop = 0; hop < 6; hop++) {
-    await guardHost(url);
-    const res = await fetch(url, { redirect: "manual", headers: { "User-Agent": USER_AGENT, Accept: accept, "Accept-Language": "en-IN,en;q=0.8" }, signal: AbortSignal.timeout(TIMEOUT), cache: "no-store" });
-    const loc = res.headers.get("location");
-    if (res.status >= 300 && res.status < 400 && loc) {
-      url = new URL(loc, url);
-      if (!/^https?:$/.test(url.protocol)) throw new AnalyzeError("Redirected to an unsupported address.");
-      continue;
-    }
-    return { res, url };
-  }
-  throw new AnalyzeError("Too many redirects.");
-}
-
-async function readCapped(res: Response): Promise<string> {
-  const reader = res.body?.getReader();
-  if (!reader) return "";
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    chunks.push(value);
-    if (total > MAX_BYTES) { await reader.cancel(); break; }
-  }
-  return new TextDecoder("utf-8").decode(Buffer.concat(chunks));
-}
-
-// robots.txt: honour Disallow rules for our agent or "*" on the homepage path.
-export function robotsAllows(txt: string, path: string, agent = "arkriaauditbot"): boolean {
-  const groups: { agents: string[]; rules: { allow: boolean; path: string }[] }[] = [];
-  let cur: (typeof groups)[number] | null = null;
-  let lastWasAgent = false;
-  for (const line of txt.split(/\r?\n/)) {
-    const l = line.replace(/#.*/, "").trim();
-    const m = l.match(/^([\w-]+)\s*:\s*(.*)$/);
-    if (!m) continue;
-    const key = m[1].toLowerCase();
-    const val = m[2].trim();
-    if (key === "user-agent") {
-      if (!cur || !lastWasAgent) { cur = { agents: [], rules: [] }; groups.push(cur); }
-      cur.agents.push(val.toLowerCase());
-      lastWasAgent = true;
-    } else {
-      lastWasAgent = false;
-      if (cur && (key === "allow" || key === "disallow")) cur.rules.push({ allow: key === "allow", path: val });
-    }
-  }
-  const mine = groups.filter((g) => g.agents.some((a) => a !== "*" && agent.includes(a)));
-  const rules = (mine.length ? mine : groups.filter((g) => g.agents.includes("*"))).flatMap((g) => g.rules);
-  let best: { allow: boolean; len: number } | null = null;
-  for (const r of rules) {
-    if (!r.path) continue; // empty Disallow = allow all
-    const pattern = new RegExp("^" + r.path.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\\\$$/, "$"));
-    if (pattern.test(path) && (!best || r.path.length > best.len || (r.path.length === best.len && r.allow))) best = { allow: r.allow, len: r.path.length };
-  }
-  return best ? best.allow : true;
-}
-
-async function robotsCheck(u: URL): Promise<boolean> {
-  try {
-    const { res } = await get(new URL("/robots.txt", u.origin), "text/plain");
-    if (!res.ok) return true;
-    return robotsAllows((await readCapped(res)).slice(0, 200_000), u.pathname || "/");
-  } catch (e) {
-    if (e instanceof AnalyzeError) throw e;
-    return true; // unreachable robots.txt = no restrictions (RFC 9309)
-  }
-}
+const get = async (u: URL, accept: string) => { const r = await guardedFetch(u, { accept, timeout: 12_000 }); return { res: r.res, url: r.url }; };
+const readCapped = async (res: Response) => (await readBody(res, 2_000_000)).text;
 
 // ---------- page analysis ----------
 

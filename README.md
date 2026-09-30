@@ -96,6 +96,52 @@ Keep it running with `pm2` or systemd. Back up the `data/` folder.
 
 Google's Maps Platform terms limit how long Places content may be stored. Review them for your use, and use **Refresh** / re-search to keep data current.
 
+## Website Intelligence Auditor
+
+`/lead-finder/audit` runs a deep, evidence-based audit of any public website. Enter a URL, choose how many pages to crawl (10, 25, 50 or 100), optionally add up to 3 competitor URLs, and press **Start deep audit**. The audit shows its progress live, step by step, and results fill in as each module finishes.
+
+**What it checks.** It crawls the site's important pages (robots.txt and crawl-delay respected; forms never submitted) and analyzes:
+
+- performance and Core Web Vitals;
+- images, fonts, JavaScript and CSS (including unused code coverage);
+- mobile, plus 8 responsive breakpoints with screenshots;
+- UI / visual design and first impression;
+- UX and user journeys;
+- conversion, lead generation and forms;
+- SEO and local SEO;
+- content and trust;
+- accessibility (axe-core, labelled as automated findings);
+- passive security (HTTPS, certificate, headers, cookies, exposed versions);
+- technology;
+- e-commerce (when detected);
+- business-type specific expectations (real estate, restaurant, clinic, SaaS, hotel and others).
+
+**Findings.** Every finding lists its severity (CRITICAL / HIGH / MEDIUM / LOW / INFO), evidence, impact and recommendation. It is labelled by source: HTML, response headers, crawler, Arkria browser, Google PageSpeed, real-user Chrome UX Report data, axe-core, or **AI ANALYSIS**. Anything that can't be measured says **Not measured**; nothing is estimated silently.
+
+**The report** contains:
+- an executive summary;
+- 12 scores, each backed by findings;
+- sections for every area above;
+- a page-by-page table;
+- an issue explorer (filter by severity, category, page or type; sort by severity, impact or quick wins);
+- quick wins and high-impact improvements;
+- cross-impact issues;
+- competitor differences;
+- the **Arkria opportunity** score, with the recommended and secondary services and the evidence behind them;
+- internal sales intelligence: price, cost, margin, hours, lead quality, outreach angle, objections and pitch.
+
+**Actions:**
+- **Generate client report**: printable; excludes internal scoring, cost, margin and sales strategy unless you choose to include them.
+- **Generate personalized pitch.**
+- **Add to leads**: links the audit to the lead.
+- **Create proposal**: pre-filled from the audit.
+
+Every lead with a website also has a **Deep audit** button.
+
+**Where it runs.** Crawling and analysis run on the server. Each step is a short request, so it also works on serverless hosting. Browser-based checks need Chrome, Edge or Chromium on the machine running the app. They work automatically when you run it locally or on your own server; on Vercel they are marked "Not measured". Google PageSpeed data is added automatically (a `GOOGLE_PAGESPEED_API_KEY` raises the quota). `ANTHROPIC_API_KEY` adds AI ANALYSIS of the screenshots and copy.
+
+Audits are stored separately from the workspace: in `data/audits/` locally, or in the `arkria_audits` table on Supabase (re-run `supabase/schema.sql`).
+
 ## What's editable in the app
 
 - **Settings → Studio profile, Quotes & payments:** name, contact details, GSTIN, UPI and bank details, quote numbering, default GST, quote validity and payment terms.
@@ -112,7 +158,9 @@ Changes on these screens wait for the **Save changes** button. Everything else s
 | `/lead-finder` | Discover businesses: smart search, filters, FIND LEADS, today's opportunities, CSV import, manual add |
 | `/lead-finder/[id]` | Lead intelligence: why this lead, recommended service, website audit, outreach drafts, mini audit, sourced business data |
 | `/lead-finder/database` | Every discovered business with filters, bulk analyze, add to pipeline, CSV/PDF export |
-| `/lead-finder/audit` | Website auditor for any URL |
+| `/lead-finder/audit` | Website Intelligence Auditor: deep audit, competitor comparison, recent audits |
+| `/lead-finder/audits/[id]` | Full audit report with actions (client report, pitch, add to leads, proposal) |
+| `/lead-finder/audits/[id]/client` | Printable client-facing audit report |
 | `/lead-finder/searches` | Saved searches, search history, auto find |
 | `/leads` | Pipeline board + list (9 stages), conversion rates, lead audit and estimates, convert to client |
 | `/clients` | Clients, onboarding checklist, projects and payments per client |
@@ -144,4 +192,11 @@ Changes on these screens wait for the **Save changes** button. Everything else s
   - `server/`, which holds the provider layer (`providers.ts`, the `LeadProvider` interface and Google Places), the website analyzer, the Claude layer and auto find.
   
   API routes live under `api/lead-finder/*` and use the same team password as the store.
+- `src/lib/audit/` holds the Website Intelligence Auditor:
+  - `server/`: the network guard, crawler, site probe, headless browser, PageSpeed, link checker, AI and storage;
+  - `engine/`: the analyzer modules (performance, experience, conversion, seo, quality, opportunity, report);
+  - `orchestrator.ts`: the step-by-step runner;
+  - `technology.ts`: evidence-based technology detection.
+  
+  API routes live under `api/audit/*` and `api/audits`.
 - `src/lib/pricing-data.ts` holds the default pricing for new workspaces. The live copy is in the database and edited in Settings.

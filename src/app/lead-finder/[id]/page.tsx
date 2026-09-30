@@ -2,7 +2,7 @@
 import React, { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowLeft, Check, Clock, Copy, FileDown, Gauge, AtSign, Globe, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, RefreshCw, Sparkles, Star, Target, Trash2, UserRound } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ScanSearch, Check, Clock, Copy, FileDown, Gauge, AtSign, Globe, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, RefreshCw, Sparkles, Star, Target, Trash2, UserRound } from "lucide-react";
 import { useDB } from "@/lib/store";
 import type { Prospect, ProspectStatus } from "@/lib/types";
 import { SIGNALS } from "@/lib/leadfinder/catalog";
@@ -126,10 +126,22 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
           <Card>
             <CardHeader title="Website audit" sub={p.audit ? `Checked ${new Date(p.audit.analyzedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}` : p.website ? "Not checked yet" : "No website found"}
               action={p.website && <div className="no-print flex gap-1.5">
+                <Link href={`/lead-finder/audit?url=${encodeURIComponent(p.website)}&prospect=${p.id}`}><Btn size="sm"><ScanSearch size={13} /> Deep audit</Btn></Link>
                 <Btn size="sm" variant="outline" disabled={!!busy} onClick={() => void analyze(false)}><RefreshCw size={13} className={busy === "analyze" ? "animate-spin" : ""} /> {p.audit ? "Re-check" : "Analyze"}</Btn>
                 {pagespeedOn && <Btn size="sm" variant="outline" disabled={!!busy} onClick={() => void analyze(true)} title="Google PageSpeed, mobile (~30s)"><Gauge size={13} className={busy === "pagespeed" ? "animate-pulse" : ""} /> PageSpeed</Btn>}
               </div>} />
-            <div className="p-5"><AuditView p={p} /></div>
+            <div className="p-5">
+              {p.deepAudit && (
+                <Link href={`/lead-finder/audits/${p.deepAudit.id}`} className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-accent-line bg-accent-soft px-4 py-3 transition hover:border-accent">
+                  <div>
+                    <div className="text-[12px] font-semibold uppercase tracking-wide text-accent">Deep audit · {new Date(p.deepAudit.at).toLocaleDateString("en-IN")}</div>
+                    <div className="text-[13px]">Website health <b>{p.deepAudit.overall ?? "—"}</b>/100 · Arkria opportunity <b>{p.deepAudit.opportunity}</b>/100{p.deepAudit.service ? ` · ${p.deepAudit.service}` : ""}</div>
+                  </div>
+                  <span className="text-[12.5px] font-medium text-accent">View report →</span>
+                </Link>
+              )}
+              <AuditView p={p} />
+            </div>
           </Card>
 
           <OutreachCard p={p} ai={ai} onContacted={(ch) => act.markContacted(p, ch)} contacted={!!lead && lead.stage !== "new" && lead.stage !== "qualified"} />

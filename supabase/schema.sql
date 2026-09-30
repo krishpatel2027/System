@@ -23,3 +23,17 @@ on conflict (id) do nothing;
 -- Only the server (using the service-role key, which bypasses RLS) may read or
 -- write. With RLS on and no policies, the public anon key has no access at all.
 alter table public.arkria_store enable row level security;
+
+-- Website Intelligence Auditor reports. Each full audit (crawl data, findings,
+-- screenshots) is its own row so the workspace document stays small.
+create table if not exists public.arkria_audits (
+  id text primary key,
+  url text not null,
+  domain text not null,
+  prospect_id text,
+  summary jsonb not null default '{}'::jsonb,
+  data jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists arkria_audits_created_idx on public.arkria_audits (created_at desc);
+alter table public.arkria_audits enable row level security;

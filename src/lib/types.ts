@@ -423,6 +423,7 @@ export interface Prospect {
   leadId?: string;
   notes?: string;
   searchId?: string;
+  deepAudit?: { id: string; at: string; overall: number | null; opportunity: number; service?: string };
   discoveredAt: string;
   updatedAt: string;
 }

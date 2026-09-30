@@ -43,7 +43,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 const ALL_NAV = NAV_GROUPS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.label })));
 
 // Pages without the app chrome: login, internal documents, public share links.
-const isBare = (path: string) => path === "/login" || path === "/lead-finder/report" || /^\/(quotes|proposals)\/[^/]+$/.test(path);
+const isBare = (path: string) => path === "/login" || path === "/lead-finder/report" || /^\/lead-finder\/audits\/[^/]+\/client$/.test(path) || /^\/(quotes|proposals)\/[^/]+$/.test(path);
 const isActive = (path: string, href: string) => path === href || (href !== "/" && path.startsWith(href + "/"));
 
 // Public share pages never load the workspace store, so a client opening a
