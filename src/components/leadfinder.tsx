@@ -12,6 +12,7 @@ import { Badge, Card, Progress as Bar } from "@/components/ui";
 
 export const SOURCE_LABEL: Record<SourceId, string> = {
   google_places: "Google Business listing",
+  serpapi: "Google Maps listing (via SerpApi)",
   website: "Business website",
   pagespeed: "Google PageSpeed",
   csv: "CSV import",
@@ -217,7 +218,7 @@ export function ProviderNotConnected({ compact }: { compact?: boolean }) {
       <div>
         <div className="font-semibold text-amber-900 dark:text-amber-200">Lead provider not connected.</div>
         <div className="mt-0.5 text-amber-800/90 dark:text-amber-300/90">
-          Add <code className="rounded bg-amber-100 px-1 dark:bg-amber-900/60">GOOGLE_PLACES_API_KEY</code> to the server environment to discover businesses. Until then you can import a CSV, add businesses manually, and use the Website Auditor.
+          Add <code className="rounded bg-amber-100 px-1 dark:bg-amber-900/60">GOOGLE_PLACES_API_KEY</code> or <code className="rounded bg-amber-100 px-1 dark:bg-amber-900/60">SERPAPI_API_KEY</code> to the server environment to discover businesses. Until then you can import a CSV, add businesses manually, and use the Website Auditor.
           {!compact && <> See <Link href="/settings?section=integrations" className="font-medium underline">Settings → Integrations</Link>.</>}
         </div>
       </div>
@@ -276,7 +277,7 @@ const SEV: Record<Finding["severity"], "red" | "amber" | "neutral"> = { high: "r
 
 export function AuditView({ p }: { p: Prospect }) {
   const a = p.audit;
-  if (!p.website) return <div className="text-[13.5px] text-muted">No website was found for this business{p.sources.includes("google_places") ? " on its Google listing" : ""}. That&apos;s the opportunity.</div>;
+  if (!p.website) return <div className="text-[13.5px] text-muted">No website was found for this business{p.sources.includes("google_places") || p.sources.includes("serpapi") ? " on its Google listing" : ""}. That&apos;s the opportunity.</div>;
   if (!a) return <div className="text-[13.5px] text-muted">Run an analysis to check mobile-friendliness, speed, SEO basics, security and contact options.</div>;
   if (!a.ok) return <div className="rounded-xl bg-surface-2 px-4 py-3 text-[13.5px]"><span className="font-medium">{a.blockedByRobots ? "Not checked" : "Couldn't load the website"}.</span> <span className="text-muted">{a.error}</span></div>;
   const findings = [...a.findings].sort((x, y) => ["high", "medium", "low"].indexOf(x.severity) - ["high", "medium", "low"].indexOf(y.severity));

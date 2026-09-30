@@ -6,13 +6,13 @@ import { DedupeIndex } from "../dedupe";
 import { evaluate } from "../engine";
 import { providerQueries } from "../nlp";
 import { isDue, mergeInto, passesQuery } from "../prospect";
-import { activeProvider, ProviderError } from "./providers";
+import { activeProvider, ProviderError, type LeadProvider } from "./providers";
 import { analyzeWebsite } from "./analyzer";
 
 // Server-side discovery, used by AUTO FIND (cron). The in-app FIND LEADS flow
 // runs the same steps from the browser so it can show live progress.
 
-export async function searchProvider(q: SearchQuery): Promise<{ prospects: Prospect[]; errors: string[] }> {
+export async function searchProvider(q: SearchQuery): Promise<{ prospects: Prospect[]; errors: string[]; source: LeadProvider["id"] }> {
   const provider = activeProvider();
   if (!provider) throw new ProviderError("Lead provider not connected.", 503);
   const queries = providerQueries(q);
@@ -33,7 +33,7 @@ export async function searchProvider(q: SearchQuery): Promise<{ prospects: Prosp
       errors.push(`${pq.text}: ${(e as Error).message}`);
     }
   }
-  return { prospects: out.slice(0, Math.min(q.limit || 50, 100)), errors };
+  return { prospects: out.slice(0, Math.min(q.limit || 50, 100)), errors, source: provider.id };
 }
 
 async function pool<T>(items: T[], n: number, fn: (t: T) => Promise<void>) {
@@ -42,7 +42,7 @@ async function pool<T>(items: T[], n: number, fn: (t: T) => Promise<void>) {
 }
 
 export async function runSavedSearch(db: DB, s: SavedSearch, deadline: number): Promise<{ added: Prospect[]; run: SearchRun }> {
-  const { prospects } = await searchProvider(s.query);
+  const { prospects, source } = await searchProvider(s.query);
   const idx = new DedupeIndex(db.prospects);
   const fresh: Prospect[] = [];
   let duplicates = 0;
@@ -60,7 +60,7 @@ export async function runSavedSearch(db: DB, s: SavedSearch, deadline: number): 
   const evaluated = fresh.map((p) => evaluate(p, db.services, db.finder.scoring));
   const kept = evaluated.filter((p) => passesQuery(p, { ...s.query, minScore: Math.max(s.query.minScore, 0) }));
   const run: SearchRun = {
-    id: uid("run"), at: new Date().toISOString(), label: `Auto: ${s.name}`, query: s.query, source: "google_places",
+    id: uid("run"), at: new Date().toISOString(), label: `Auto: ${s.name}`, query: s.query, source,
     found: prospects.length, added: kept.length, duplicates, qualified: kept.filter((p) => (p.score?.total ?? 0) >= db.finder.scoring.qualified).length, savedSearchId: s.id,
   };
   return { added: kept, run };

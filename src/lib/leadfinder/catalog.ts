@@ -16,6 +16,19 @@ export const CITIES = [
   "Nashik", "Visakhapatnam", "Mysuru", "India",
 ];
 
+// City-centre coordinates, used as the map position for providers that need one.
+export const CITY_COORDS: Record<string, [number, number]> = {
+  ahmedabad: [23.0225, 72.5714], gandhinagar: [23.2156, 72.6369], surat: [21.1702, 72.8311], vadodara: [22.3072, 73.1812],
+  rajkot: [22.3039, 70.8022], mumbai: [19.076, 72.8777], "navi mumbai": [19.033, 73.0297], thane: [19.2183, 72.9781],
+  pune: [18.5204, 73.8567], nagpur: [21.1458, 79.0882], delhi: [28.7041, 77.1025], "new delhi": [28.6139, 77.209],
+  "delhi ncr": [28.6139, 77.209], gurugram: [28.4595, 77.0266], gurgaon: [28.4595, 77.0266], noida: [28.5355, 77.391],
+  bengaluru: [12.9716, 77.5946], bangalore: [12.9716, 77.5946], hyderabad: [17.385, 78.4867], chennai: [13.0827, 80.2707],
+  kolkata: [22.5726, 88.3639], jaipur: [26.9124, 75.7873], udaipur: [24.5854, 73.7125], indore: [22.7196, 75.8577],
+  bhopal: [23.2599, 77.4126], lucknow: [26.8467, 80.9462], chandigarh: [30.7333, 76.7794], kochi: [9.9312, 76.2673],
+  coimbatore: [11.0168, 76.9558], goa: [15.4909, 73.8278], nashik: [19.9975, 73.7898], visakhapatnam: [17.6868, 83.2185],
+  mysuru: [12.2958, 76.6394],
+};
+
 export const SIGNALS: Record<Signal, { label: string; kind: "opportunity" | "strength" | "context" }> = {
   no_website: { label: "No website", kind: "opportunity" },
   website_unreachable: { label: "Website not loading", kind: "opportunity" },

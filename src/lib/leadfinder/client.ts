@@ -26,7 +26,7 @@ export async function lfApi<T>(path: string, body?: unknown): Promise<T> {
   return data as T;
 }
 
-export interface FinderStatus { integrations: ProviderInfo[]; providerConnected: boolean; autoFind: boolean }
+export interface FinderStatus { integrations: ProviderInfo[]; providerConnected: boolean; provider: { id: string; name: string } | null; autoFind: boolean }
 
 let statusCache: FinderStatus | null = null;
 export function useFinderStatus() {
@@ -103,7 +103,7 @@ export function useDiscovery() {
     setRunning(true);
     try {
       setProgress({ stage: "search", done: 0, total: 1 });
-      const { prospects, errors } = await lfApi<{ prospects: Prospect[]; errors: string[] }>("search", { query: q });
+      const { prospects, errors, source } = await lfApi<{ prospects: Prospect[]; errors: string[]; source: SearchRun["source"] }>("search", { query: q });
 
       setProgress({ stage: "dedupe", done: 0, total: prospects.length });
       const db = getDB();
@@ -135,7 +135,7 @@ export function useDiscovery() {
       const kept = evaluated.filter((p) => passesQuery(p, q));
 
       const runRec: SearchRun = {
-        id: uid("run"), at: new Date().toISOString(), label, query: q, source: "google_places",
+        id: uid("run"), at: new Date().toISOString(), label, query: q, source,
         found: prospects.length, added: kept.length, duplicates,
         qualified: kept.filter((p) => (p.score?.total ?? 0) >= cur.finder.scoring.qualified).length, savedSearchId,
       };

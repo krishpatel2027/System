@@ -89,6 +89,7 @@ Keep it running with `pm2` or systemd. Back up the `data/` folder.
 **Setup.** See `.env.example` → Lead Finder.
 
 - `GOOGLE_PLACES_API_KEY` turns on discovery through Places API (New) Text Search. Up to 60 results per location × industry, billed by Google per request.
+- `SERPAPI_API_KEY` is the alternative. It uses SerpApi's Google Maps engine and returns the same listing data. Each page of up to 20 results uses one SerpApi search credit, up to 3 pages per location × industry. It's used only when `GOOGLE_PLACES_API_KEY` is empty. Data from it is labelled "Google Maps listing (via SerpApi)".
 - `GOOGLE_PAGESPEED_API_KEY` is optional.
 - `ANTHROPIC_API_KEY` is optional. It uses `claude-opus-5-5` with server-side fallbacks enabled (`fallbacks: "default"`), so a request can be served by a fallback model if the primary is unavailable.
 - `CRON_SECRET` enables **Auto find**. On Vercel, `vercel.json` runs `/api/lead-finder/auto` daily at 09:00 IST. It runs daily/weekly saved searches that are due and adds only new, de-duplicated businesses. The Vercel Hobby plan allows one cron per day. On your own server, call that URL from cron with `Authorization: Bearer $CRON_SECRET`.
@@ -137,7 +138,7 @@ Changes on these screens wait for the **Save changes** button. Everything else s
 - `src/lib/store.tsx` is the client store. It saves instantly to the browser, syncs with the server, pulls teammates' changes every 15 seconds, and merges conflicts by record (`src/lib/merge.ts`).
 - `src/lib/server-store.ts` holds the file and Supabase backends, with optimistic versioning.
 - `src/lib/migrate.ts` upgrades stored data from older versions.
-- `src/lib/leadfinder/` holds the Lead Finder. It contains:
+- `src/lib/leadfinder/` holds the Lead Finder (discovery providers: Google Places and SerpApi). It contains:
   - pure engines: `engine.ts` (signals, scoring, matching), `nlp.ts`, `outreach.ts`, `dedupe.ts` and `csv.ts`;
   - `client.ts` for the browser flows;
   - `server/`, which holds the provider layer (`providers.ts`, the `LeadProvider` interface and Google Places), the website analyzer, the Claude layer and auto find.

@@ -52,7 +52,7 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
       for (const k of ["phone", "website", "rating", "reviewCount", "address", "googleMapsUrl", "openingHours", "category"] as const) {
         if (p.provenance[k]?.source === "manual") continue;
         (next as unknown as Record<string, unknown>)[k] = g[k];
-        if (g[k] !== undefined) next.provenance[k] = { source: "google_places", confidence: "verified" };
+        if (g[k] !== undefined) next.provenance[k] = g.provenance[k] ?? { source: g.sources[0], confidence: "verified" };
         else delete next.provenance[k];
       }
       if (next.website !== p.website) { next.audit = undefined; next.websiteStatus = next.website ? "unchecked" : "none"; }
