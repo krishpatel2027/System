@@ -49,7 +49,19 @@ interface Place {
   editorialSummary?: { text: string };
 }
 
-const placesKey = () => (process.env.GOOGLE_PLACES_API_KEY ?? "").trim();
+// Tolerates common paste mistakes in hosting dashboards: surrounding quotes,
+// spaces/newlines, or the whole "NAME=value" line pasted as the value.
+export function envKey(...names: string[]) {
+  for (const n of names) {
+    const v = (process.env[n] ?? "").trim().replace(/^[A-Z_]+=/, "").replace(/^["']|["']$/g, "").trim();
+    if (v) return v;
+  }
+  return "";
+}
+// Safe to show the team: length and last 4 characters only.
+export const keyHint = (k: string) => (k ? `…${k.slice(-4)}, ${k.length} characters` : "not set");
+
+const placesKey = () => envKey("GOOGLE_PLACES_API_KEY");
 
 async function placesFetch(path: string, init: RequestInit & { fieldMask: string }) {
   const res = await fetch(`${PLACES}${path}`, {
@@ -162,7 +174,7 @@ interface SerpResponse {
   serpapi_pagination?: { next?: string };
 }
 
-const serpKey = () => (process.env.SERPAPI_API_KEY ?? process.env.SERPAPI_KEY ?? "").trim();
+const serpKey = () => envKey("SERPAPI_API_KEY", "SERPAPI_KEY");
 
 async function serpFetch(url: URL): Promise<SerpResponse> {
   url.searchParams.set("api_key", serpKey());
@@ -173,6 +185,7 @@ async function serpFetch(url: URL): Promise<SerpResponse> {
   if (body.error && /hasn't returned any results|no results/i.test(body.error)) return {};
   if (!res.ok || body.error) {
     const status = res.status === 401 || /invalid api key/i.test(body.error ?? "") ? 400 : res.status === 429 || /run out of searches|limit/i.test(body.error ?? "") ? 429 : 502;
+    if (status === 400 && /invalid api key/i.test(body.error ?? "")) throw new ProviderError(`SerpApi rejected the key in SERPAPI_API_KEY (${keyHint(serpKey())}). SerpApi keys are 64 characters — copy it again from serpapi.com/manage-api-key, update it in your hosting settings and redeploy.`, 400);
     throw new ProviderError(`SerpApi: ${body.error ?? `request failed (${res.status})`}`, status);
   }
   return body;
@@ -256,7 +269,7 @@ export const activeProvider = () => PROVIDERS.find((p) => p.connected()) ?? null
 export function integrations(): ProviderInfo[] {
   return [
     { id: "google_places", name: "Google Places", connected: googlePlaces.connected(), envVar: "GOOGLE_PLACES_API_KEY", note: "Business discovery (official Google API): name, category, address, phone, website, rating, reviews." },
-    { id: "serpapi", name: "SerpApi — Google Maps", connected: serpApi.connected(), envVar: "SERPAPI_API_KEY", note: `Alternative business discovery from Google Maps results.${googlePlaces.connected() && serpApi.connected() ? " Google Places is used while both are set." : ""}` },
+    { id: "serpapi", name: "SerpApi — Google Maps", connected: serpApi.connected(), envVar: "SERPAPI_API_KEY", note: `Alternative business discovery from Google Maps results.${serpApi.connected() ? ` Key: ${keyHint(serpKey())}${serpKey().length !== 64 ? " — SerpApi keys are normally 64 characters, check it was copied fully" : ""}.` : ""}${googlePlaces.connected() && serpApi.connected() ? " Google Places is used while both are set." : ""}` },
     { id: "website", name: "Website analyzer", connected: true, note: "Built in. Reads public homepages and respects robots.txt." },
     { id: "pagespeed", name: "Google PageSpeed", connected: !!(process.env.GOOGLE_PAGESPEED_API_KEY ?? "").trim(), envVar: "GOOGLE_PAGESPEED_API_KEY", note: "Optional. Adds Google's mobile performance score to audits." },
     { id: "claude", name: "Claude AI", connected: !!(process.env.ANTHROPIC_API_KEY ?? "").trim(), envVar: "ANTHROPIC_API_KEY", note: "Optional. Smarter search parsing and personalised outreach drafts. Rule-based fallback otherwise." },

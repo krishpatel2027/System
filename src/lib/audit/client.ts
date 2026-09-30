@@ -23,7 +23,7 @@ async function api<T>(path: string, body?: unknown, method?: string): Promise<T>
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
-    const err = new Error(String(data.error ?? `Request failed (${res.status})`)) as Error & { status?: number; data?: Record<string, unknown> };
+    const err = new Error(String(data.error ?? `Server error ${res.status} on ${path} — see the deployment logs`)) as Error & { status?: number; data?: Record<string, unknown> };
     err.status = res.status;
     err.data = data;
     throw err;

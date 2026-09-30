@@ -22,7 +22,7 @@ export async function lfApi<T>(path: string, body?: unknown): Promise<T> {
     cache: "no-store",
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new ApiError(String(data.error ?? `Request failed (${res.status})`), res.status, data);
+  if (!res.ok) throw new ApiError(String(data.error ?? `Server error ${res.status} on ${path} — see the deployment logs`), res.status, data);
   return data as T;
 }
 

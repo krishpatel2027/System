@@ -45,6 +45,8 @@ function scores(ctx: Ctx, fs: Finding[]): Record<ScoreKey, ScoreCell> {
       const src = [ctx.psi && "Google PageSpeed (mobile)", ctx.runs.length && "Arkria browser measurements", "server response timing"].filter(Boolean);
       basis = src.join(" + ");
       if (ctx.psi?.scores) score = Math.round((score + ctx.psi.scores.performance) / 2);
+      // Server timing alone can't justify a speed score.
+      if (!ctx.psi && !ctx.runs.length) { score = null; basis = "Not measured — needs Google PageSpeed data or a browser; server response time is still checked below"; }
     }
     if (k === "design") {
       if (!ctx.desk?.design && !ctx.ai) { score = null; basis = "Not measured — needs a browser (Chrome/Edge) on the server or AI analysis"; }

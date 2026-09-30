@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import type { Browser, BrowserContext, Page } from "playwright-core";
 import type { BreakpointRow, BrowserImage, BrowserRun, ResourceRow } from "../types";
 import { scriptPurpose } from "../technology";
 import { guardActive, guardHost, hostAllowed, normalizeUrl, robotsCheck, AnalyzeError } from "./net";
@@ -28,12 +28,18 @@ function candidates(): string[] {
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/microsoft-edge", "/snap/bin/chromium",
   ];
-  try { list.push(chromium.executablePath()); } catch {}
   return list.filter((x): x is string => !!x);
 }
 
+// Loaded only when a check actually runs, so hosts without a browser
+// (serverless) never load the browser driver at all.
+const playwright = () => import("playwright-core");
+
+const serverless = () => !!(process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
+
 export function browserStatus(): { available: boolean; path?: string; reason?: string } {
   if (process.env.AUDIT_BROWSER === "off") return { available: false, reason: "Browser checks are turned off (AUDIT_BROWSER=off)." };
+  if (serverless() && !process.env.AUDIT_BROWSER_PATH) return { available: false, reason: "This hosting (serverless) has no Chrome/Edge browser, so rendering-based checks run only when the app runs on a computer or server with Chrome or Edge." };
   const path = candidates().find((p) => { try { return existsSync(p); } catch { return false; } });
   return path ? { available: true, path } : { available: false, reason: "No Chrome, Edge or Chromium browser was found on this server. Browser-based checks (Core Web Vitals, screenshots, rendering) need one — they run when the app runs on a computer with Chrome or Edge installed, or set AUDIT_BROWSER_PATH." };
 }
@@ -63,11 +69,11 @@ async function getBrowser(): Promise<Browser> {
     const st = browserStatus();
     if (!st.available) throw new AnalyzeError(st.reason ?? "No browser available");
     const root = typeof process.getuid === "function" && process.getuid() === 0;
-    browserP = chromium.launch({
+    browserP = playwright().then(({ chromium }) => chromium.launch({
       executablePath: st.path,
       headless: true,
       args: ["--disable-dev-shm-usage", "--disable-gpu", "--mute-audio", "--no-first-run", "--no-default-browser-check", ...(root ? ["--no-sandbox"] : [])],
-    }).catch((e) => { browserP = null; throw e; });
+    })).catch((e) => { browserP = null; throw e; });
   }
   return browserP;
 }
