@@ -6,19 +6,20 @@ import {
   LayoutDashboard, Users, UserPlus, Layers, Package as Pkg, Calculator,
   FileText, Presentation, KanbanSquare, Repeat, Wallet, Wrench, LayoutTemplate,
   BarChart3, Settings, Search, Sun, Moon, Plus, Bell, Menu, X, CornerDownLeft,
-  ArrowRight, LogOut, AlertTriangle, type LucideIcon,
+  ArrowRight, LogOut, AlertTriangle, Radar, type LucideIcon,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { addDaysISO, cn } from "@/lib/utils";
 import { StoreProvider, useDB } from "@/lib/store";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: "Overview", items: [
-    { href: "/", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/", label: "Command Center", icon: LayoutDashboard },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
   ] },
   { label: "Sales", items: [
-    { href: "/leads", label: "Leads", icon: UserPlus },
+    { href: "/lead-finder", label: "Lead Finder", icon: Radar },
+    { href: "/leads", label: "Pipeline", icon: UserPlus },
     { href: "/clients", label: "Clients", icon: Users },
     { href: "/proposals", label: "Proposals", icon: Presentation },
     { href: "/quotes", label: "Quotes", icon: FileText },
@@ -42,7 +43,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 const ALL_NAV = NAV_GROUPS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.label })));
 
 // Pages without the app chrome: login, internal documents, public share links.
-const isBare = (path: string) => path === "/login" || /^\/(quotes|proposals)\/[^/]+$/.test(path);
+const isBare = (path: string) => path === "/login" || path === "/lead-finder/report" || /^\/(quotes|proposals)\/[^/]+$/.test(path);
 const isActive = (path: string, href: string) => path === href || (href !== "/" && path.startsWith(href + "/"));
 
 // Public share pages never load the workspace store, so a client opening a
@@ -102,17 +103,22 @@ function AppChrome({ path, children }: { path: string; children: React.ReactNode
   const openLeads = db.leads.filter((l) => !["won", "lost"].includes(l.stage)).length;
   const overduePays = db.payments.filter((p) => p.status !== "paid" && p.due < today).length;
 
+  const alertSince = useMemo(() => addDaysISO(-3), []);
+  const hotProspects = db.prospects.filter((p) => !p.leadId && p.status !== "not_fit" && (p.score?.total ?? 0) >= db.finder.scoring.high && p.discoveredAt >= alertSince);
+
   const notifs = useMemo(() => {
     const out: { text: string; href: string }[] = [];
+    // Lead alerts: new high-opportunity businesses from recent searches.
+    hotProspects.slice(0, 3).forEach((p) => out.push({ text: `New lead: ${p.name} scored ${p.score?.total}${p.match ? ` · ${p.match.serviceName}` : ""}`, href: `/lead-finder/${p.id}` }));
     db.leads.filter((l) => l.nextFollowUp && !["won", "lost"].includes(l.stage) && l.nextFollowUp <= today)
       .forEach((l) => out.push({ text: `Follow up with ${l.company}`, href: "/leads" }));
     db.payments.filter((p) => p.status !== "paid" && p.due <= today)
       .forEach((p) => out.push({ text: `${p.clientName} · ${p.label} is due`, href: "/payments" }));
     return out.slice(0, 8);
-  }, [db, today]);
+  }, [db, today, hotProspects]);
 
   const current = ALL_NAV.find((n) => isActive(path, n.href));
-  const badge = (href: string) => (href === "/leads" ? openLeads : href === "/payments" ? overduePays : 0);
+  const badge = (href: string) => (href === "/leads" ? openLeads : href === "/payments" ? overduePays : href === "/lead-finder" ? hotProspects.length : 0);
 
   const syncLabel = { synced: "All changes saved", pulling: "Syncing…", pushing: "Saving…", error: "Sync error — retry", local: "Offline — saved on this device", locked: "Sign in required", misconfigured: "Server not configured" }[sync];
   const syncDot = sync === "synced" ? "bg-emerald-500" : sync === "error" || sync === "misconfigured" ? "bg-red-500" : sync === "local" || sync === "locked" ? "bg-subtle" : "bg-amber-500 animate-pulse";

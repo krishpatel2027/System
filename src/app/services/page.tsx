@@ -4,14 +4,17 @@ import { useDB } from "@/lib/store";
 import { inr, uid, cn } from "@/lib/utils";
 import { Card, Badge, Btn, Modal, Field, inputCls, PageHeader, Empty } from "@/components/ui";
 import { Plus, Layers, Pencil, Trash2 } from "lucide-react";
-import type { Service } from "@/lib/types";
+import type { Service, Signal } from "@/lib/types";
+import { ALL_SIGNALS, INDUSTRIES, SIGNALS } from "@/lib/leadfinder/catalog";
+import { ChipsInput } from "@/components/leadfinder-forms";
+import { evaluate } from "@/lib/leadfinder/engine";
 
 const CATS = ["Websites", "E-commerce", "Web Applications", "Mobile Apps", "AI", "Ongoing"];
 const COMPLEXITY: Service["complexity"][] = ["Low", "Medium", "High", "Expert"];
-const blank = (): Service => ({ id: uid("s"), name: "", category: "Websites", description: "", basePrice: 0, internalCost: 0, hours: 0, complexity: "Medium", clientFacing: "", active: true });
+const blank = (): Service => ({ id: uid("s"), name: "", category: "Websites", description: "", basePrice: 0, internalCost: 0, hours: 0, complexity: "Medium", clientFacing: "", active: true, idealIndustries: [], signals: [] });
 
 export default function ServicesPage() {
-  const { db, update } = useDB();
+  const { db, update, mutate } = useDB();
   const [cat, setCat] = useState("All");
   const [edit, setEdit] = useState<Service | null>(null);
   const isNew = !!edit && !db.services.some((s) => s.id === edit.id);
@@ -21,9 +24,13 @@ export default function ServicesPage() {
   const save = () => {
     if (!edit) return;
     if (!edit.name.trim()) return alert("Give the service a name.");
-    update("services", isNew ? [edit, ...db.services] : db.services.map((s) => (s.id === edit.id ? edit : s)));
+    const next = isNew ? [edit, ...db.services] : db.services.map((s) => (s.id === edit.id ? edit : s));
+    // Service prices and signals drive lead matching, so refresh recommendations.
+    mutate((d) => ({ services: next, prospects: d.prospects.map((p) => evaluate(p, next, d.finder.scoring)) }));
     setEdit(null);
   };
+  const demand = (id: string) => db.prospects.filter((p) => p.match?.serviceId === id).length;
+  const toggleSignal = (sig: Signal) => edit && setEdit({ ...edit, signals: edit.signals?.includes(sig) ? edit.signals.filter((x) => x !== sig) : [...(edit.signals ?? []), sig] });
   const margin = (s: Service) => (s.basePrice ? Math.round(((s.basePrice - s.internalCost) / s.basePrice) * 100) : 0);
 
   return (
@@ -59,7 +66,7 @@ export default function ServicesPage() {
                   <div className="px-2 py-2.5"><div className={cn("text-[14px] font-semibold tabular-nums", m < 30 ? "text-red-600" : m < 40 ? "text-amber-600" : "text-emerald-600")}>{m}%</div><div className="text-[11px] text-subtle">Margin</div></div>
                 </div>
                 <div className="mt-3 flex items-center justify-between text-[12px] text-muted">
-                  <span>~{s.hours}h to deliver</span>
+                  <span>~{s.hours}h to deliver{db.prospects.length > 0 && <> · <span className="text-ink">{demand(s.id)}</span> matched leads</>}</span>
                   <div className="flex gap-0.5">
                     <button title="Edit" className="rounded-lg p-1.5 text-subtle hover:bg-surface-2 hover:text-ink" onClick={() => setEdit(s)}><Pencil size={14} /></button>
                     <button title="Delete" className="rounded-lg p-1.5 text-subtle hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950" onClick={() => { if (confirm(`Delete ${s.name}?`)) update("services", db.services.filter((x) => x.id !== s.id)); }}><Trash2 size={14} /></button>
@@ -71,7 +78,7 @@ export default function ServicesPage() {
         </div>
       )}
 
-      <Modal open={!!edit} onClose={() => setEdit(null)} title={isNew ? "Add service" : "Edit service"}
+      <Modal open={!!edit} wide onClose={() => setEdit(null)} title={isNew ? "Add service" : "Edit service"}
         footer={<><Btn variant="ghost" onClick={() => setEdit(null)}>Cancel</Btn><Btn onClick={save}>Save service</Btn></>}>
         {edit && (
           <div className="grid gap-4">
@@ -86,6 +93,34 @@ export default function ServicesPage() {
             </div>
             <Field label="Internal description"><input className={inputCls} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></Field>
             <Field label="How you describe it to clients"><textarea rows={2} className={inputCls} value={edit.clientFacing} onChange={(e) => setEdit({ ...edit, clientFacing: e.target.value })} /></Field>
+            <div className="rounded-xl border border-line p-4">
+              <div className="text-[13.5px] font-semibold">Lead Finder matching</div>
+              <p className="mt-0.5 text-[12px] text-muted">Which evidence points to this service, and who it suits. Used to recommend a service for each discovered business.</p>
+              <div className="mt-3 space-y-4">
+                <div>
+                  <div className="mb-1.5 text-[12.5px] font-medium text-muted">Signals that suggest this service</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ALL_SIGNALS.filter((sig) => SIGNALS[sig].kind !== "strength").map((sig) => (
+                      <button key={sig} type="button" onClick={() => toggleSignal(sig)}
+                        className={cn("rounded-lg px-2 py-1 text-[12px] font-medium ring-1 ring-inset transition", edit.signals?.includes(sig) ? "bg-accent-soft text-ink ring-accent-line" : "text-muted ring-line hover:text-ink")}>
+                        {SIGNALS[sig].label}
+                      </button>
+                    ))}
+                    {(["established_business", "active_social"] as Signal[]).map((sig) => (
+                      <button key={sig} type="button" onClick={() => toggleSignal(sig)}
+                        className={cn("rounded-lg px-2 py-1 text-[12px] font-medium ring-1 ring-inset transition", edit.signals?.includes(sig) ? "bg-emerald-50 text-emerald-800 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-200 dark:ring-emerald-900" : "text-muted ring-line hover:text-ink")}>
+                        {SIGNALS[sig].label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <Field label="Ideal industries" hint="Leave empty to suit every industry."><ChipsInput id="svc-inds" values={edit.idealIndustries ?? []} onChange={(v) => setEdit({ ...edit, idealIndustries: v })} options={INDUSTRIES} placeholder="Add industries…" /></Field>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Typical budget from (₹)"><input type="number" min={0} className={inputCls} value={edit.minBudget ?? ""} onChange={(e) => setEdit({ ...edit, minBudget: e.target.value ? Number(e.target.value) : undefined })} /></Field>
+                  <Field label="Typical budget to (₹)"><input type="number" min={0} className={inputCls} value={edit.maxBudget ?? ""} onChange={(e) => setEdit({ ...edit, maxBudget: e.target.value ? Number(e.target.value) : undefined })} /></Field>
+                </div>
+              </div>
+            </div>
             <datalist id="svc-cats">{CATS.map((c) => <option key={c} value={c} />)}</datalist>
           </div>
         )}

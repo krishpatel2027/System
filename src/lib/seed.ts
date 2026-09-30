@@ -1,7 +1,8 @@
 import type { DB, Settings } from "./types";
 import { DEFAULT_PRICING } from "./pricing-data";
+import { DEFAULT_SCORING, withServiceIntel } from "./leadfinder/catalog";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const ONBOARDING_ITEMS = [
   "Logo received",
@@ -65,5 +66,9 @@ export const seedDB: DB = {
   comms: [],
   pricing: DEFAULT_PRICING,
   settings: DEFAULT_SETTINGS,
+  prospects: [],
+  finder: { scoring: DEFAULT_SCORING, savedSearches: [], history: [] },
   meta: { schema: SCHEMA_VERSION },
 };
+
+seedDB.services = seedDB.services.map(withServiceIntel);

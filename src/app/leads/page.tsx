@@ -3,13 +3,14 @@ import React, { useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useDB } from "@/lib/store";
 import { inr, uid, todayISO, addDaysISO, daysUntil, cn } from "@/lib/utils";
-import { STAGES, leadValue } from "@/lib/stages";
+import { STAGES, leadValue, stageIndex, withStage } from "@/lib/stages";
 import type { Lead, LeadStage } from "@/lib/types";
 import { Badge, Btn, Modal, Field, inputCls, PageHeader, Tabs, Avatar, Empty } from "@/components/ui";
-import { Plus, Search, CalendarClock, LayoutGrid, List, UserPlus, Check } from "lucide-react";
+import { Plus, Search, CalendarClock, LayoutGrid, List, UserPlus, Check, Radar } from "lucide-react";
+import Link from "next/link";
 
-const SERVICES = ["Landing Page", "Business Website", "Corporate Website", "Premium Interactive Website", "E-commerce", "Web Application", "Mobile App", "AI Chatbot", "SEO", "Maintenance"];
-const SOURCES = ["Website", "Instagram", "Referral", "WhatsApp", "Cold outreach", "Ads"];
+const BASE_SERVICES = ["Landing Page", "Business Website", "Corporate Website", "Premium Interactive Website", "E-commerce", "Web Application", "Mobile App", "AI Chatbot", "SEO", "Maintenance"];
+const SOURCES = ["Lead Finder", "Website", "Instagram", "Referral", "WhatsApp", "Cold outreach", "Ads"];
 
 const emptyLead = (): Lead => ({
   id: uid("lead"), company: "", industry: "", contactName: "", service: "Business Website",
@@ -32,6 +33,7 @@ function FollowUp({ date }: { date?: string }) {
 
 function LeadsInner() {
   const { db, update } = useDB();
+  const SERVICES = [...new Set([...db.services.filter((s) => s.active).map((s) => s.name), ...BASE_SERVICES])];
   const params = useSearchParams();
   const [open, setOpen] = useState(params.get("action") === "new");
   const [detail, setDetail] = useState<Lead | null>(null);
@@ -55,14 +57,19 @@ function LeadsInner() {
     setForm(emptyLead());
   };
 
-  const move = (id: string, stage: LeadStage) => update("leads", db.leads.map((l) => (l.id === id ? { ...l, stage } : l)));
+  const move = (id: string, stage: LeadStage) => update("leads", db.leads.map((l) => (l.id === id ? withStage(l, stage) : l)));
+
+  // Funnel: a lead "reached" a stage if it's there now, went past it, or its history says so.
+  const reached = (s: LeadStage) => db.leads.filter((l) => l.stageHistory?.some((h) => h.stage === s) || (l.stage !== "lost" && stageIndex(l.stage) >= stageIndex(s))).length;
+  const rate = (a: LeadStage, b: LeadStage) => { const n = reached(a); return n ? `${Math.round((reached(b) / n) * 100)}%` : "—"; };
+  const sumStage = (st: LeadStage[]) => db.leads.filter((l) => st.includes(l.stage)).reduce((a, l) => a + leadValue(l), 0);
 
   const change = (nl: Lead) => { update("leads", db.leads.map((l) => (l.id === nl.id ? nl : l))); setDetail(nl); };
 
   const convert = (l: Lead) => {
     if (db.clients.some((c) => c.company === l.company)) return alert(`${l.company} is already a client.`);
     update("clients", [{ id: uid("cl"), company: l.company, industry: l.industry, contactName: l.contactName, email: l.email, phone: l.phone, whatsapp: l.whatsapp, location: l.location, website: l.website, dateAdded: todayISO(), onboarding: {} }, ...db.clients]);
-    update("leads", db.leads.map((x) => (x.id === l.id ? { ...x, stage: "won" } : x)));
+    update("leads", db.leads.map((x) => (x.id === l.id ? withStage(x, "won") : x)));
     setDetail(null);
   };
 
@@ -75,10 +82,30 @@ function LeadsInner() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Leads"
-        description={`${open_.length} open · ${inr(open_.reduce((a, l) => a + leadValue(l), 0))} in pipeline`}
-        actions={<Btn onClick={() => { setForm(emptyLead()); setOpen(true); }}><Plus size={15} /> Add lead</Btn>}
+        title="Pipeline"
+        description={`${open_.length} open deals · drag cards between stages`}
+        actions={<>
+          <Link href="/lead-finder"><Btn variant="outline"><Radar size={14} /> Find leads</Btn></Link>
+          <Btn onClick={() => { setForm(emptyLead()); setOpen(true); }}><Plus size={15} /> Add lead</Btn>
+        </>}
       />
+
+      {db.leads.length > 0 && (
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
+          {[
+            ["Potential pipeline", inr(sumStage(["new", "qualified", "contacted", "replied", "meeting", "proposal", "negotiation"])), "Not guaranteed revenue"],
+            ["In proposal / negotiation", inr(sumStage(["proposal", "negotiation"])), `${db.leads.filter((l) => l.stage === "proposal" || l.stage === "negotiation").length} deals`],
+            ["Won", inr(sumStage(["won"])), `${db.leads.filter((l) => l.stage === "won").length} clients`],
+            ["Conversion", `${rate("contacted", "replied")} reply`, `${rate("replied", "meeting")} meeting · ${rate("meeting", "proposal")} proposal · ${rate("proposal", "won")} win`],
+          ].map(([k, v, sub]) => (
+            <div key={k} className="bg-surface px-4 py-3">
+              <div className="text-[12px] text-muted">{k}</div>
+              <div className="mt-0.5 text-[18px] font-semibold tabular-nums tracking-tight">{v}</div>
+              <div className="truncate text-[11.5px] text-subtle">{sub}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[220px] flex-1 sm:max-w-xs">
@@ -118,7 +145,7 @@ function LeadsInner() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <div className="truncate text-[13.5px] font-semibold">{l.company}</div>
-                            <div className="truncate text-[12px] text-muted">{l.contactName} · {l.service}</div>
+                            <div className="truncate text-[12px] text-muted">{[l.contactName, l.service].filter(Boolean).join(" · ")}</div>
                           </div>
                         </div>
                         <div className="mt-3 flex items-center justify-between text-[12px]">
@@ -158,7 +185,7 @@ function LeadsInner() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <Avatar name={l.company} className="h-8 w-8 text-[11px]" />
-                        <div className="min-w-0"><div className="font-medium">{l.company}</div><div className="text-[12px] text-muted">{l.contactName} · {l.service}</div></div>
+                        <div className="min-w-0"><div className="font-medium">{l.company}</div><div className="text-[12px] text-muted">{[l.contactName, l.service].filter(Boolean).join(" · ")}</div></div>
                       </div>
                     </td>
                     <td className="px-4 py-3"><Badge tone={stageTone(l.stage)} dot>{STAGES.find((s) => s.id === l.stage)?.label}</Badge></td>
@@ -206,12 +233,17 @@ function LeadsInner() {
 }
 
 function LeadDetail({ lead, onChange }: { lead: Lead; onChange: (l: Lead) => void }) {
+  const { db } = useDB();
+  const SERVICES = [...new Set([...db.services.filter((s) => s.active).map((s) => s.name), ...BASE_SERVICES])];
   const [tab, setTab] = useState<"details" | "audit" | "stage">("details");
   const set = <K extends keyof Lead>(k: K, v: Lead[K]) => onChange({ ...lead, [k]: v });
   const stageIdx = STAGES.findIndex((s) => s.id === lead.stage);
   return (
     <div className="space-y-5">
-      <Tabs tabs={["details", "audit", "stage"] as const} value={tab} onChange={setTab} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Tabs tabs={["details", "audit", "stage"] as const} value={tab} onChange={setTab} />
+        {lead.prospectId && db.prospects.some((p) => p.id === lead.prospectId) && <Link href={`/lead-finder/${lead.prospectId}`} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-accent"><Radar size={13} /> Lead intelligence</Link>}
+      </div>
       {tab === "details" && (
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Contact"><input className={inputCls} value={lead.contactName} onChange={(e) => set("contactName", e.target.value)} /></Field>
@@ -251,7 +283,7 @@ function LeadDetail({ lead, onChange }: { lead: Lead; onChange: (l: Lead) => voi
         <div className="space-y-4">
           <div className="grid gap-1.5 sm:grid-cols-4">
             {STAGES.map((s, i) => (
-              <button key={s.id} onClick={() => set("stage", s.id)}
+              <button key={s.id} onClick={() => onChange(withStage(lead, s.id))}
                 className={cn("rounded-xl border px-3 py-2 text-left text-[12.5px] font-medium transition",
                   s.id === lead.stage ? "border-accent bg-accent-soft text-ink" : i < stageIdx && lead.stage !== "lost" ? "border-line bg-surface-2 text-muted" : "border-line text-muted hover:border-line-strong")}>
                 <span className="mr-1.5 text-subtle">{i + 1}</span>{s.label}

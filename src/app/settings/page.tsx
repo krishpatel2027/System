@@ -10,8 +10,12 @@ import { Card, Btn, Field, inputCls, PageHeader, Badge } from "@/components/ui";
 import {
   Building2, Receipt, Package as PackageIcon, ListChecks, Wrench, ScrollText, Users, Database,
   Plus, Trash2, ArrowUp, ArrowDown, X, Check, Search, RotateCcw, Download, Upload, LogOut, RefreshCw, AlertTriangle, Star,
+  Gauge, PlugZap,
 } from "lucide-react";
-import type { DB, PricingConfig, Settings, RateItem } from "@/lib/types";
+import type { DB, PricingConfig, Settings, RateItem, ScoringConfig } from "@/lib/types";
+import { DEFAULT_SCORING, PART_LABELS } from "@/lib/leadfinder/catalog";
+import { evaluate } from "@/lib/leadfinder/engine";
+import { useFinderStatus } from "@/lib/leadfinder/client";
 
 const SECTIONS = [
   { id: "studio", label: "Studio profile", icon: Building2, desc: "How your studio appears on quotes and proposals." },
@@ -20,22 +24,24 @@ const SECTIONS = [
   { id: "rates", label: "Rate card", icon: ListChecks, desc: "Prices for every extra the calculator can add." },
   { id: "care", label: "Care plans", icon: Wrench, desc: "Monthly maintenance plans offered after launch." },
   { id: "terms", label: "Terms & policies", icon: ScrollText, desc: "Your policies, and which ones print on quotes." },
+  { id: "scoring", label: "Lead scoring", icon: Gauge, desc: "How the Arkria Opportunity Score weighs each factor. Saving re-scores every lead." },
+  { id: "integrations", label: "Integrations", icon: PlugZap, desc: "Lead discovery and analysis connections. Keys live on the server only." },
   { id: "team", label: "Team & access", icon: Users, desc: "Who's signed in, sync status and access." },
   { id: "data", label: "Data & backup", icon: Database, desc: "Export, restore or clear workspace data." },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
-const DRAFT_SECTIONS: SectionId[] = ["studio", "quotes", "packages", "rates", "care", "terms"];
+const DRAFT_SECTIONS: SectionId[] = ["studio", "quotes", "packages", "rates", "care", "terms", "scoring"];
 
-type Draft = { settings: Settings; pricing: PricingConfig };
+type Draft = { settings: Settings; pricing: PricingConfig; scoring: ScoringConfig };
 
 function SettingsInner() {
-  const { db, ready, update, replace } = useDB();
+  const { db, ready, update, replace, mutate } = useDB();
   const router = useRouter();
   const params = useSearchParams();
   const section = (SECTIONS.find((s) => s.id === params.get("section"))?.id ?? "studio") as SectionId;
   const go = (id: SectionId) => router.replace(`/settings?section=${id}`, { scroll: false });
 
-  const live = useMemo<Draft>(() => ({ settings: db.settings, pricing: db.pricing }), [db.settings, db.pricing]);
+  const live = useMemo<Draft>(() => ({ settings: db.settings, pricing: db.pricing, scoring: db.finder.scoring }), [db.settings, db.pricing, db.finder.scoring]);
   const [draft, setDraft] = useState<Draft>(live);
   const [start, setStart] = useState<Draft>(live);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -61,6 +67,7 @@ function SettingsInner() {
 
   const setS = (patch: Partial<Settings>) => setDraft((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
   const setP = (patch: Partial<PricingConfig>) => setDraft((d) => ({ ...d, pricing: { ...d.pricing, ...patch } }));
+  const setSc = (patch: Partial<ScoringConfig>) => setDraft((d) => ({ ...d, scoring: { ...d.scoring, ...patch } }));
 
   const validate = (d: Draft) => {
     const out: string[] = [];
@@ -75,6 +82,8 @@ function SettingsInner() {
     if (new Set(fn).size !== fn.length) out.push("Two rate-card items have the same name.");
     if (d.pricing.carePlans.some((c) => !c.name.trim())) out.push("Every care plan needs a name.");
     if (d.pricing.policies.some((p) => !p.policy.trim())) out.push("Every policy needs a title.");
+    if (Object.values(d.scoring.weights).reduce((a, b) => a + b, 0) <= 0) out.push("At least one scoring factor needs a weight.");
+    if (d.scoring.qualified > d.scoring.high) out.push("The qualified threshold must be at or below the high-opportunity threshold.");
     return out;
   };
 
@@ -84,13 +93,17 @@ function SettingsInner() {
     if (errs.length) return;
     // Fold in anything a teammate saved while this form was open.
     const merged = merge3(
-      { ...db, ...start },
-      { ...db, ...draft },
+      { ...db, settings: start.settings, pricing: start.pricing },
+      { ...db, settings: draft.settings, pricing: draft.pricing },
       db,
     );
     update("settings", merged.settings);
     update("pricing", merged.pricing);
-    const next = { settings: merged.settings, pricing: merged.pricing };
+    if (!sameDoc(draft.scoring, start.scoring)) {
+      // New rules apply to every lead, so the database stays consistent.
+      mutate((d) => ({ finder: { ...d.finder, scoring: draft.scoring }, prospects: d.prospects.map((p) => evaluate(p, d.services, draft.scoring)) }));
+    }
+    const next = { settings: merged.settings, pricing: merged.pricing, scoring: draft.scoring };
     setStart(next);
     setDraft(next);
     setSavedAt(Date.now());
@@ -144,6 +157,8 @@ function SettingsInner() {
           {section === "rates" && <RatesSection p={draft.pricing} set={setP} />}
           {section === "care" && <CareSection p={draft.pricing} set={setP} />}
           {section === "terms" && <TermsSection p={draft.pricing} set={setP} />}
+          {section === "scoring" && <ScoringSection sc={draft.scoring} set={setSc} />}
+          {section === "integrations" && <IntegrationsSection />}
           {section === "team" && <TeamSection />}
           {section === "data" && <DataSection db={db} update={update} replace={replace} />}
         </div>
@@ -164,6 +179,75 @@ function SettingsInner() {
 }
 
 // ---------- sections ----------
+
+function ScoringSection({ sc, set }: { sc: ScoringConfig; set: (p: Partial<ScoringConfig>) => void }) {
+  const total = Object.values(sc.weights).reduce((a, b) => a + b, 0);
+  const keys = Object.keys(PART_LABELS) as (keyof ScoringConfig["weights"])[];
+  const HELP: Record<keyof ScoringConfig["weights"], string> = {
+    website: "No, broken or outdated website scores highest.",
+    presence: "Google listing, rating and linked social profiles.",
+    maturity: "Review volume and rating — signs of an established business.",
+    contact: "Official phone, email or WhatsApp available.",
+    fit: "How strongly the evidence matches one of your services.",
+    value: "Size of the recommended project.",
+  };
+  return (
+    <div className="space-y-4">
+      <Card className="p-5">
+        <div className="flex items-center justify-between">
+          <div className="text-[14px] font-semibold">Factor weights</div>
+          <Badge tone={total === 100 ? "green" : "neutral"}>Total {total}{total !== 100 ? " · scaled to 100" : ""}</Badge>
+        </div>
+        <div className="mt-4 space-y-4">
+          {keys.map((k) => (
+            <div key={k} className="grid items-center gap-2 sm:grid-cols-[200px_1fr_60px]">
+              <div><div className="text-[13.5px] font-medium">{PART_LABELS[k]}</div><div className="text-[11.5px] text-subtle">{HELP[k]}</div></div>
+              <input type="range" min={0} max={40} value={sc.weights[k]} onChange={(e) => set({ weights: { ...sc.weights, [k]: Number(e.target.value) } })} className="accent-[var(--accent)]" aria-label={PART_LABELS[k]} />
+              <input type="number" min={0} max={100} value={sc.weights[k]} onChange={(e) => set({ weights: { ...sc.weights, [k]: Math.max(0, Number(e.target.value)) } })} className={cn(inputCls, "h-8 text-right tabular-nums")} />
+            </div>
+          ))}
+        </div>
+      </Card>
+      <Card className="grid gap-4 p-5 sm:grid-cols-2">
+        <Field label="Qualified from" hint="Shown as a good opportunity and counted as qualified."><input type="number" min={0} max={100} className={inputCls} value={sc.qualified} onChange={(e) => set({ qualified: Number(e.target.value) })} /></Field>
+        <Field label="High opportunity from" hint="Triggers lead alerts and the Command Center list."><input type="number" min={0} max={100} className={inputCls} value={sc.high} onChange={(e) => set({ high: Number(e.target.value) })} /></Field>
+      </Card>
+      <div className="flex items-center justify-between rounded-xl bg-surface-2 px-4 py-3 text-[12.5px] text-muted">
+        <span>The Arkria Opportunity Score is your own prioritisation, not an objective rating of a business.</span>
+        <Btn size="sm" variant="ghost" onClick={() => set(DEFAULT_SCORING)}><RotateCcw size={12} /> Defaults</Btn>
+      </div>
+    </div>
+  );
+}
+
+function IntegrationsSection() {
+  const { status, error } = useFinderStatus();
+  if (error) return <Card className="p-5 text-[13px] text-muted">Couldn&apos;t load integration status: {error}</Card>;
+  if (!status) return <Card className="p-5 text-[13px] text-muted">Checking…</Card>;
+  return (
+    <div className="space-y-4">
+      <Card className="divide-y divide-line">
+        {status.integrations.map((i) => (
+          <div key={i.id} className="flex items-start justify-between gap-4 px-5 py-4">
+            <div className="min-w-0">
+              <div className="text-[14px] font-medium">{i.name}</div>
+              <div className="mt-0.5 text-[12.5px] text-muted">{i.note}</div>
+              {i.envVar && !i.connected && <div className="mt-1 text-[12px] text-subtle">Set <code className="rounded bg-surface-2 px-1">{i.envVar}</code> in the server environment and restart.</div>}
+            </div>
+            <Badge tone={i.connected ? "green" : "neutral"} dot>{i.connected ? "Connected" : "Not connected"}</Badge>
+          </div>
+        ))}
+        <div className="flex items-start justify-between gap-4 px-5 py-4">
+          <div><div className="text-[14px] font-medium">Auto find scheduler</div><div className="mt-0.5 text-[12.5px] text-muted">Runs daily/weekly saved searches. Needs <code className="rounded bg-surface-2 px-1">CRON_SECRET</code> on Vercel (cron is set in vercel.json).</div></div>
+          <Badge tone={status.autoFind ? "green" : "neutral"} dot>{status.autoFind ? "On" : "Off"}</Badge>
+        </div>
+      </Card>
+      <div className="rounded-xl bg-surface-2 px-4 py-3 text-[12.5px] leading-relaxed text-muted">
+        API keys are read on the server and never sent to the browser. Discovery never contacts businesses — outreach is always reviewed and sent by a person.
+      </div>
+    </div>
+  );
+}
 
 function StudioSection({ s, set }: { s: Settings; set: (p: Partial<Settings>) => void }) {
   return (

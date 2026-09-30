@@ -1,6 +1,7 @@
 import type { DB } from "./types";
 import { DEFAULT_SETTINGS, SCHEMA_VERSION, seedDB } from "./seed";
 import { DEFAULT_PRICING } from "./pricing-data";
+import { DEFAULT_SCORING, withServiceIntel } from "./leadfinder/catalog";
 
 // Record ids that only ever came from the old demo seed. Real records use uid().
 const DEMO_IDS: Partial<Record<keyof DB, string[]>> = {
@@ -40,6 +41,13 @@ export function migrate(raw: unknown): DB | null {
   }
   delete doc.packages;
 
+  if (schema < 3) {
+    // Pipeline stages now follow the Lead Finder funnel.
+    const STAGE_MAP: Record<string, string> = { interested: "replied", discovery: "meeting" };
+    if (Array.isArray(doc.leads)) doc.leads = doc.leads.map((l: { stage?: string }) => (l?.stage && STAGE_MAP[l.stage] ? { ...l, stage: STAGE_MAP[l.stage] } : l));
+    if (Array.isArray(doc.services)) doc.services = doc.services.map((sv) => withServiceIntel(sv as DB["services"][number]));
+  }
+
   const pricing = (doc.pricing ?? {}) as Partial<DB["pricing"]>;
   const out = {
     ...seedDB,
@@ -51,6 +59,12 @@ export function migrate(raw: unknown): DB | null {
       carePlans: pricing.carePlans ?? DEFAULT_PRICING.carePlans,
       policies: pricing.policies ?? DEFAULT_PRICING.policies,
       hourly: pricing.hourly ?? DEFAULT_PRICING.hourly,
+    },
+    prospects: Array.isArray(doc.prospects) ? doc.prospects : [],
+    finder: {
+      scoring: { ...DEFAULT_SCORING, ...((doc.finder as Partial<DB["finder"]>)?.scoring ?? {}), weights: { ...DEFAULT_SCORING.weights, ...((doc.finder as Partial<DB["finder"]>)?.scoring?.weights ?? {}) } },
+      savedSearches: (doc.finder as Partial<DB["finder"]>)?.savedSearches ?? [],
+      history: (doc.finder as Partial<DB["finder"]>)?.history ?? [],
     },
     meta: { schema: SCHEMA_VERSION },
   } as DB;

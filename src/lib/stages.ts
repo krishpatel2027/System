@@ -8,14 +8,23 @@ export const quoteTone = (s: Quote["status"]) =>
 
 export const STAGES: { id: LeadStage; label: string }[] = [
   { id: "new", label: "New" },
+  { id: "qualified", label: "Qualified" },
   { id: "contacted", label: "Contacted" },
-  { id: "interested", label: "Interested" },
-  { id: "discovery", label: "Discovery" },
-  { id: "proposal", label: "Proposal sent" },
+  { id: "replied", label: "Replied" },
+  { id: "meeting", label: "Meeting" },
+  { id: "proposal", label: "Proposal" },
   { id: "negotiation", label: "Negotiation" },
   { id: "won", label: "Won" },
   { id: "lost", label: "Lost" },
 ];
+
+export const stageIndex = (s: LeadStage) => STAGES.findIndex((x) => x.id === s);
+
+// Moves a lead to a stage and records when, so conversion rates are measurable.
+export function withStage<T extends { stage: LeadStage; stageHistory?: { stage: LeadStage; at: string }[] }>(lead: T, stage: LeadStage): T {
+  if (lead.stage === stage) return lead;
+  return { ...lead, stage, stageHistory: [...(lead.stageHistory ?? []), { stage, at: new Date().toISOString() }] };
+}
 
 export const OPEN_STAGES = STAGES.filter((s) => s.id !== "won" && s.id !== "lost");
 

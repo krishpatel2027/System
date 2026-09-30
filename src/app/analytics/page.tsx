@@ -2,7 +2,7 @@
 import React, { useMemo } from "react";
 import { useDB } from "@/lib/store";
 import { inr, quoteTotals } from "@/lib/utils";
-import { STAGES, leadValue } from "@/lib/stages";
+import { STAGES, leadValue, stageIndex } from "@/lib/stages";
 import { useHydrated } from "@/lib/use-hydrated";
 import { Card, CardHeader, Metric, PageHeader, Empty } from "@/components/ui";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
@@ -60,14 +60,34 @@ export default function AnalyticsPage() {
     .sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value, sub: inr(value) }));
   const stages = STAGES.map((s) => ({ label: s.label, value: db.leads.filter((l) => l.stage === s.id).length })).filter((s) => s.value > 0);
 
-  const empty = db.leads.length === 0 && db.payments.length === 0 && db.quotes.length === 0;
+  // Lead Finder funnel and service demand.
+  const reachedStage = (st: (typeof STAGES)[number]["id"]) => db.leads.filter((l) => l.stageHistory?.some((h) => h.stage === st) || (l.stage !== "lost" && stageIndex(l.stage) >= stageIndex(st))).length;
+  const qualifiedAt = db.finder.scoring.qualified;
+  const funnel = [
+    { label: "Businesses found", value: db.prospects.length },
+    { label: `Qualified (score ≥ ${qualifiedAt})`, value: db.prospects.filter((p) => (p.score?.total ?? 0) >= qualifiedAt).length },
+    { label: "Added to pipeline", value: db.leads.length },
+    { label: "Contacted", value: reachedStage("contacted") },
+    { label: "Replied", value: reachedStage("replied") },
+    { label: "Meeting", value: reachedStage("meeting") },
+    { label: "Proposal", value: reachedStage("proposal") },
+    { label: "Won", value: reachedStage("won") },
+  ];
+  const demand = db.services.map((s) => {
+    const ps = db.prospects.filter((p) => p.match?.serviceId === s.id);
+    return { name: s.name.replace("Cross-platform ", ""), Leads: ps.length, Value: ps.reduce((a, p) => a + (p.match?.price ?? 0), 0) };
+  }).filter((d) => d.Leads > 0).sort((a, b) => b.Leads - a.Leads);
+  const byIndustry = Object.entries(db.prospects.reduce<Record<string, number>>((a, p) => ({ ...a, [p.industry || "Unknown"]: (a[p.industry || "Unknown"] ?? 0) + 1 }), {}))
+    .sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ label, value }));
+
+  const empty = db.leads.length === 0 && db.payments.length === 0 && db.quotes.length === 0 && db.prospects.length === 0;
 
   return (
     <div className="space-y-6">
       <PageHeader title="Analytics" description="How your pipeline converts and where revenue comes from." />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Metric label="Open pipeline" value={inr(open.reduce((a, l) => a + leadValue(l), 0))} sub={`${open.length} open leads`} icon={<Target size={15} />} />
+        <Metric label="Potential pipeline" value={inr(open.reduce((a, l) => a + leadValue(l), 0))} sub={`${open.length} open leads · not guaranteed`} icon={<Target size={15} />} />
         <Metric label="Win rate" value={`${pct(won, won + lost)}%`} sub={won + lost ? `${won} won · ${lost} lost` : "No decided leads yet"} icon={<Trophy size={15} />} />
         <Metric label="Quote acceptance" value={`${pct(accepted.length, decided.length)}%`} sub={`Avg deal ${inr(avgDeal)}`} icon={<FileCheck2 size={15} />} />
         <Metric label="Collected to date" value={inr(collected)} sub={`${db.payments.filter((p) => p.status === "paid").length} payments`} icon={<Wallet size={15} />} accent="text-emerald-600 dark:text-emerald-400" />
@@ -97,7 +117,42 @@ export default function AnalyticsPage() {
             </div>
           </Card>
 
+          {db.prospects.length > 0 && (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.4fr]">
+              <Card>
+                <CardHeader title="Lead funnel" sub="From discovery to won work" />
+                <div className="space-y-2 p-5">
+                  {funnel.map((f, i) => (
+                    <div key={f.label} className="grid grid-cols-[150px_1fr_auto] items-center gap-3 text-[12.5px]">
+                      <span className="truncate text-muted">{f.label}</span>
+                      <div className="h-6 overflow-hidden rounded-md bg-surface-2"><div className="h-full rounded-md bg-accent transition-all" style={{ width: `${Math.max(f.value ? 3 : 0, pct(f.value, funnel[0].value))}%`, opacity: 1 - i * 0.08 }} /></div>
+                      <span className="w-16 text-right tabular-nums"><span className="font-medium">{f.value}</span>{i > 0 && <span className="text-subtle"> · {pct(f.value, funnel[i - 1].value)}%</span>}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+              <Card>
+                <CardHeader title="Service demand" sub="Discovered businesses by recommended service · potential value, not guaranteed" />
+                <div className="h-72 p-4 pt-2">
+                  {hydrated && (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={demand} layout="vertical" margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
+                        <CartesianGrid horizontal={false} stroke="var(--line)" />
+                        <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} tick={{ fill: "var(--muted)" }} />
+                        <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} fontSize={12} width={150} tick={{ fill: "var(--muted)" }} />
+                        <Tooltip cursor={{ fill: "var(--surface-2)" }} formatter={(v, k, item) => (k === "Leads" ? [`${v} leads · ${inr((item?.payload as { Value: number }).Value)} potential`, "Demand"] : v)}
+                          contentStyle={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, fontSize: 12.5, color: "var(--ink)" }} />
+                        <Bar dataKey="Leads" fill="var(--accent)" radius={[0, 6, 6, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </Card>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            {byIndustry.length > 0 && <Card><CardHeader title="Discovered by industry" /><div className="p-5"><Bars rows={byIndustry} total={db.prospects.length} /></div></Card>}
             <Card><CardHeader title="Leads by stage" /><div className="p-5"><Bars rows={stages} total={db.leads.length} /></div></Card>
             <Card><CardHeader title="Where leads come from" /><div className="p-5"><Bars rows={sources} total={db.leads.length} /></div></Card>
             <Card><CardHeader title="Open pipeline by service" /><div className="p-5"><Bars rows={services} total={services.reduce((a, s) => a + s.value, 0)} /></div></Card>

@@ -32,7 +32,7 @@ function write(key: string, value: unknown) {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {}
 }
-function authHeaders(): Record<string, string> {
+export function authHeaders(): Record<string, string> {
   try {
     const token = localStorage.getItem(TOKEN_KEY);
     if (token) return { Authorization: `Bearer ${token}` };
@@ -44,6 +44,9 @@ type StoreValue = {
   db: DB;
   ready: boolean;
   update: <K extends keyof DB>(key: K, val: DB[K]) => void;
+  // Functional update against the latest state; safe inside long async flows.
+  mutate: (fn: (db: DB) => Partial<DB>) => void;
+  getDB: () => DB;
   replace: (next: DB) => void;
   sync: SyncState;
   backend: string | null;
@@ -236,6 +239,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       dbRef.current = next;
       return next;
     }),
+    mutate: (fn) => setDb((d) => {
+      const next = { ...d, ...fn(d) };
+      dbRef.current = next;
+      return next;
+    }),
+    getDB: () => dbRef.current,
     replace: (next) => commit(migrate(next) ?? next),
     sync,
     backend,
