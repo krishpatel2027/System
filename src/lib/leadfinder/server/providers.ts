@@ -10,7 +10,7 @@ export interface ProviderSearch { text: string; industry: string; location: stri
 export interface ProviderInfo { id: string; name: string; connected: boolean; note: string; envVar?: string }
 
 export interface LeadProvider {
-  id: "google_places" | "serpapi";
+  id: "google_places" | "serpapi" | "searchapi";
   name: string;
   connected(): boolean;
   searchBusinesses(q: ProviderSearch): Promise<Prospect[]>;
@@ -198,7 +198,7 @@ function city(address?: string, fallback?: string) {
   return (i > 0 ? parts[i - 1] : undefined) ?? (fallback || undefined);
 }
 
-function normalizeSerp(p: SerpPlace, industry: string, location: string): Prospect | null {
+function normalizeSerp(p: SerpPlace, industry: string, location: string, source: "serpapi" | "searchapi" = "serpapi"): Prospect | null {
   if (!p.title || !p.place_id) return null;
   if (p.open_state && /permanently closed|temporarily closed/i.test(p.open_state)) return null;
   const web = p.website;
@@ -221,10 +221,10 @@ function normalizeSerp(p: SerpPlace, industry: string, location: string): Prospe
       description: p.description,
       openingHours: p.operating_hours ? Object.entries(p.operating_hours).map(([d, h]) => `${d[0].toUpperCase()}${d.slice(1)}: ${h}`) : undefined,
     },
-    "serpapi",
+    source,
   );
-  if (!pr.industry) pr.provenance.industry = { source: "serpapi", confidence: "estimated" };
-  if (pr.city && !/\d/.test(pr.city)) pr.provenance.city = { source: "serpapi", confidence: "detected" };
+  if (!pr.industry) pr.provenance.industry = { source, confidence: "estimated" };
+  if (pr.city && !/\d/.test(pr.city)) pr.provenance.city = { source, confidence: "detected" };
   return pr;
 }
 
@@ -262,14 +262,104 @@ export const serpApi: LeadProvider = {
   },
 };
 
+// ---------- SearchApi.io (Google Maps results) ----------
+// Another Google Maps results API. Request/response shape follows SearchApi's
+// official google_maps / google_maps_place engines (local_results[]).
+// The key goes in the Authorization header, never in the URL.
+
+interface SearchApiPlace {
+  title?: string;
+  place_id?: string;
+  address?: string;
+  phone?: string;
+  website?: string;
+  rating?: number;
+  reviews?: number;
+  type?: string;
+  types?: string[];
+  hours?: string;
+  open_hours?: Record<string, string>;
+  description?: string;
+  business_status?: string;
+  permanently_closed?: boolean;
+}
+interface SearchApiResponse {
+  error?: string;
+  local_results?: SearchApiPlace[];
+  place_result?: SearchApiPlace;
+  place_results?: SearchApiPlace;
+}
+
+const SEARCHAPI = "https://www.searchapi.io/api/v1/search";
+const searchApiKey = () => envKey("SEARCHAPI_API_KEY", "SEARCHAPI_KEY");
+
+async function searchApiFetch(params: Record<string, string>): Promise<SearchApiResponse> {
+  const url = new URL(SEARCHAPI);
+  url.search = new URLSearchParams(params).toString();
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${searchApiKey()}`, Accept: "application/json" }, signal: AbortSignal.timeout(30000), cache: "no-store" });
+  let body: SearchApiResponse = {};
+  try { body = (await res.json()) as SearchApiResponse; } catch {}
+  const err = typeof body.error === "string" ? body.error : "";
+  if (err && /no results|hasn't returned any results|didn't return any results/i.test(err)) return {};
+  if (!res.ok || err) {
+    if (res.status === 401 || res.status === 403 || /invalid api key|unauthori[sz]ed|api key/i.test(err))
+      throw new ProviderError(`SearchApi.io rejected the key in SEARCHAPI_API_KEY (${keyHint(searchApiKey())}). Copy it again from searchapi.io (Dashboard → API key), update it in your hosting settings and redeploy.`, 400);
+    if (res.status === 429 || /limit|quota|credits|searches left/i.test(err)) throw new ProviderError(`SearchApi.io: ${err || "search limit reached"}`, 429);
+    throw new ProviderError(`SearchApi.io: ${err || `request failed (${res.status})`}`, 502);
+  }
+  return body;
+}
+
+function fromSearchApi(p: SearchApiPlace): SerpPlace {
+  const closed = p.permanently_closed || /closed_(permanently|temporarily)/i.test(p.business_status ?? "");
+  return {
+    title: p.title, place_id: p.place_id, address: p.address, phone: p.phone, website: p.website,
+    rating: typeof p.rating === "number" ? p.rating : undefined,
+    reviews: typeof p.reviews === "number" ? p.reviews : undefined,
+    type: p.type, types: p.types, description: p.description,
+    open_state: closed ? "Permanently closed" : p.hours,
+    operating_hours: p.open_hours && typeof p.open_hours === "object" && !Array.isArray(p.open_hours) ? p.open_hours : undefined,
+  };
+}
+
+export const searchApi: LeadProvider = {
+  id: "searchapi",
+  name: "SearchApi.io (Google Maps)",
+  connected: () => !!searchApiKey(),
+  async searchBusinesses(q) {
+    const out: Prospect[] = [];
+    const params: Record<string, string> = { engine: "google_maps", q: q.text, hl: "en", gl: "in" };
+    const at = CITY_COORDS[q.location.trim().toLowerCase()];
+    if (at) params.ll = `@${at[0]},${at[1]},12z`;
+    // Up to 20 results per page; each page is one SearchApi credit.
+    for (let page = 1; page <= 3 && out.length < q.limit; page++) {
+      const data = await searchApiFetch({ ...params, page: String(page) });
+      const list = data.local_results ?? [];
+      for (const p of list) {
+        const n = normalizeSerp(fromSearchApi(p), q.industry, q.location, "searchapi");
+        if (n) out.push(n);
+      }
+      if (list.length < 20) break;
+    }
+    return out.slice(0, q.limit);
+  },
+  async getBusinessDetails(placeId) {
+    if (!/^[\w-]{10,300}$/.test(placeId)) throw new ProviderError("Invalid place id", 400);
+    const data = await searchApiFetch({ engine: "google_maps_place", place_id: placeId, hl: "en", gl: "in" });
+    const p = data.place_result ?? data.place_results ?? data.local_results?.[0];
+    return p ? normalizeSerp(fromSearchApi({ ...p, place_id: p.place_id || placeId }), "", "", "searchapi") : null;
+  },
+};
+
 // Google's official API first when both are configured.
-export const PROVIDERS: LeadProvider[] = [googlePlaces, serpApi];
+export const PROVIDERS: LeadProvider[] = [googlePlaces, serpApi, searchApi];
 export const activeProvider = () => PROVIDERS.find((p) => p.connected()) ?? null;
 
 export function integrations(): ProviderInfo[] {
   return [
     { id: "google_places", name: "Google Places", connected: googlePlaces.connected(), envVar: "GOOGLE_PLACES_API_KEY", note: "Business discovery (official Google API): name, category, address, phone, website, rating, reviews." },
     { id: "serpapi", name: "SerpApi — Google Maps", connected: serpApi.connected(), envVar: "SERPAPI_API_KEY", note: `Alternative business discovery from Google Maps results.${serpApi.connected() ? ` Key: ${keyHint(serpKey())}${serpKey().length !== 64 ? " — SerpApi keys are normally 64 characters, check it was copied fully" : ""}.` : ""}${googlePlaces.connected() && serpApi.connected() ? " Google Places is used while both are set." : ""}` },
+    { id: "searchapi", name: "SearchApi.io — Google Maps", connected: searchApi.connected(), envVar: "SEARCHAPI_API_KEY", note: `Alternative business discovery from Google Maps results.${searchApi.connected() ? ` Key: ${keyHint(searchApiKey())}.` : ""}${searchApi.connected() && (googlePlaces.connected() || serpApi.connected()) ? ` ${googlePlaces.connected() ? "Google Places" : "SerpApi"} is used while both are set.` : ""}` },
     { id: "website", name: "Website analyzer", connected: true, note: "Built in. Reads public homepages and respects robots.txt." },
     { id: "pagespeed", name: "Google PageSpeed", connected: !!(process.env.GOOGLE_PAGESPEED_API_KEY ?? "").trim(), envVar: "GOOGLE_PAGESPEED_API_KEY", note: "Optional. Adds Google's mobile performance score to audits." },
     { id: "claude", name: "Claude AI", connected: !!(process.env.ANTHROPIC_API_KEY ?? "").trim(), envVar: "ANTHROPIC_API_KEY", note: "Optional. Smarter search parsing and personalised outreach drafts. Rule-based fallback otherwise." },

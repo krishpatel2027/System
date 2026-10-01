@@ -42,7 +42,7 @@ export function deriveSignals(p: Prospect): { signals: Signal[]; evidence: Parti
   let websiteStatus: WebsiteStatus = p.website ? "unchecked" : "none";
 
   if (!p.website) {
-    const where = p.sources.includes("google_places") || p.sources.includes("serpapi") ? "its Google Business listing" : p.sources.includes("csv") ? "the imported record" : "the lead record";
+    const where = p.sources.some((s) => s === "google_places" || s === "serpapi" || s === "searchapi") ? "its Google Business listing" : p.sources.includes("csv") ? "the imported record" : "the lead record";
     add("no_website", `No website listed on ${where}.`);
   } else if (a) {
     websiteStatus = classifyAudit(a);

@@ -328,7 +328,7 @@ export type Signal =
   | "tech_business";
 
 export type Confidence = "verified" | "detected" | "estimated" | "not_found";
-export type SourceId = "google_places" | "serpapi" | "website" | "pagespeed" | "csv" | "manual";
+export type SourceId = "google_places" | "serpapi" | "searchapi" | "website" | "pagespeed" | "csv" | "manual";
 export type WebsiteStatus = "none" | "unreachable" | "outdated" | "basic" | "good" | "unchecked";
 export type ProspectStatus = "new" | "reviewing" | "qualified" | "not_fit";
 
