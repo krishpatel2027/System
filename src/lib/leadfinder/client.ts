@@ -6,9 +6,14 @@ import { addDaysISO, todayISO, uid } from "../utils";
 import { withStage } from "../stages";
 import { DedupeIndex } from "./dedupe";
 import { evaluate } from "./engine";
-import { mergeInto, newProspect, passesQuery } from "./prospect";
+import { applyAudit, applyResolution, mergeInto, newProspect, passesQuery } from "./prospect";
+export { applyAudit, applyResolution };
 import { IMPORT_COLUMNS, mapHeader, parseCSV, toCSV } from "./csv";
 import type { ProviderInfo } from "./server/providers";
+import type { ResolveResult } from "./server/resolve";
+
+// Each web search for a missing or outdated website uses one search credit.
+export const WEBSITE_SEARCHES_PER_RUN = 20;
 
 export class ApiError extends Error {
   constructor(message: string, public status: number, public data: Record<string, unknown> = {}) { super(message); }
@@ -48,27 +53,6 @@ export const emptyQuery = (): SearchQuery => ({ text: "", locations: [], industr
 
 export async function analyzeUrl(url: string, withPageSpeed = false): Promise<WebsiteAudit> {
   return (await lfApi<{ audit: WebsiteAudit }>("analyze", { url, pagespeed: withPageSpeed })).audit;
-}
-
-// Adds what the website itself publishes (contact, socials) as "detected" data.
-export function applyAudit(p: Prospect, audit: WebsiteAudit): Prospect {
-  const out: Prospect = { ...p, audit, provenance: { ...p.provenance }, socials: { ...p.socials } };
-  if (!audit.ok) return out;
-  const det = { source: "website" as const, confidence: "detected" as const };
-  if (!out.phone && audit.found.phones[0]) { out.phone = audit.found.phones[0]; out.provenance.phone = det; }
-  if (!out.email && audit.found.emails[0]) { out.email = audit.found.emails[0]; out.provenance.email = det; }
-  if (!out.whatsapp && audit.found.whatsapp) {
-    const num = audit.found.whatsapp.match(/(?:wa\.me\/|phone=)(\d{10,15})/)?.[1];
-    if (num) { out.whatsapp = `+${num}`; out.provenance.whatsapp = det; }
-  }
-  for (const [k, v] of Object.entries(audit.found.socials)) {
-    const key = k as keyof Prospect["socials"];
-    if (v && !out.socials[key]) { out.socials[key] = v; out.provenance[`social.${k}`] = det; }
-  }
-  if (!out.description && audit.found.description) { out.description = audit.found.description; out.provenance.description = det; }
-  if (!out.sources.includes("website")) out.sources = [...out.sources, "website"];
-  if (audit.pagespeed && !out.sources.includes("pagespeed")) out.sources = [...out.sources, "pagespeed"];
-  return out;
 }
 
 async function pool<T>(items: T[], n: number, fn: (t: T, i: number) => Promise<void>, cancelled: () => boolean) {
@@ -116,17 +100,33 @@ export function useDiscovery() {
         fresh.push(p);
       }
 
-      const withSite = fresh.filter((p) => p.website);
-      setProgress({ stage: "websites", done: 0, total: withSite.length });
+      // Confirm each business's real website: the Google listing's link can be
+      // old, broken or a directory page, and some listings have none at all.
+      setProgress({ stage: "websites", done: 0, total: fresh.length });
       let checked = 0;
-      await pool(withSite, 5, async (p) => {
+      let searchesLeft = WEBSITE_SEARCHES_PER_RUN;
+      let searchError: string | null = null;
+      await pool(fresh, 4, async (p) => {
+        const ask = (allowSearch: boolean) => lfApi<ResolveResult>("resolve", { name: p.name, city: p.city, address: p.address, phone: p.phone, website: p.website, placeId: p.placeId, allowSearch });
         try {
-          const audit = await analyzeUrl(p.website!);
-          Object.assign(p, applyAudit(p, audit));
-        } catch {}
+          let r: ResolveResult;
+          try {
+            r = await ask(searchesLeft > 0 && !searchError);
+          } catch (e) {
+            // Out of search credits or a bad key: keep going without web search.
+            if (!(e instanceof ApiError) || (e.status !== 400 && e.status !== 429)) throw e;
+            searchError = e.message;
+            r = await ask(false);
+          }
+          if (r.check.searched) searchesLeft--;
+          Object.assign(p, applyResolution(p, r));
+        } catch {
+          if (p.website) { try { Object.assign(p, applyAudit(p, await analyzeUrl(p.website))); } catch {} }
+        }
         checked++;
-        setProgress({ stage: "websites", done: checked, total: withSite.length });
+        setProgress({ stage: "websites", done: checked, total: fresh.length });
       }, () => cancel.current);
+      if (searchError) errors.push(`Website search stopped early: ${searchError}`);
 
       setProgress({ stage: "score", done: fresh.length, total: fresh.length });
       const cur = getDB();

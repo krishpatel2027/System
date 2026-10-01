@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowLeft, ScanSearch, Check, Clock, Copy, FileDown, Gauge, AtSign, Globe, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, RefreshCw, Sparkles, Star, Target, Trash2, UserRound } from "lucide-react";
 import { useDB } from "@/lib/store";
 import type { Prospect, ProspectStatus } from "@/lib/types";
+import type { ResolveResult } from "@/lib/leadfinder/server/resolve";
 import { SIGNALS } from "@/lib/leadfinder/catalog";
 import { opportunityLabel } from "@/lib/leadfinder/engine";
 import { CHANNELS, miniAudit, outreach, waLink, type Channel } from "@/lib/leadfinder/outreach";
-import { lfApi, useFinderStatus, useProspectActions } from "@/lib/leadfinder/client";
+import { applyResolution, lfApi, useFinderStatus, useProspectActions } from "@/lib/leadfinder/client";
 import { STAGES } from "@/lib/stages";
 import { cn } from "@/lib/utils";
 import { Badge, Btn, Card, CardHeader, Empty, Field, inputCls, Modal, Tabs } from "@/components/ui";
@@ -51,6 +52,8 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
       const next: Prospect = { ...p, provenance: { ...p.provenance } };
       for (const k of ["phone", "website", "rating", "reviewCount", "address", "googleMapsUrl", "openingHours", "category"] as const) {
         if (p.provenance[k]?.source === "manual") continue;
+        // Keep the confirmed website rather than the listing's old/wrong link.
+        if (k === "website" && p.websiteCheck?.listingWebsite && (g.website ?? "") === p.websiteCheck.listingWebsite) continue;
         (next as unknown as Record<string, unknown>)[k] = g[k];
         if (g[k] !== undefined) next.provenance[k] = g.provenance[k] ?? { source: g.sources[0], confidence: "verified" };
         else delete next.provenance[k];
@@ -58,6 +61,18 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
       if (next.website !== p.website) { next.audit = undefined; next.websiteStatus = next.website ? "unchecked" : "none"; }
       act.reevaluate(next);
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
+  };
+  const recheckWebsite = async () => {
+    setBusy("resolve"); setErr(null);
+    try {
+      const r = await lfApi<ResolveResult>("resolve", { name: p.name, city: p.city, address: p.address, phone: p.phone, website: p.provenance.website?.source === "manual" ? p.website : p.websiteCheck?.listingWebsite ?? p.website, placeId: p.placeId, allowSearch: true });
+      const latest = db.prospects.find((x) => x.id === p.id) ?? p;
+      act.reevaluate(applyResolution(latest, r));
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
+  };
+  const useWebsite = (url: string) => {
+    const next: Prospect = { ...p, website: url, audit: undefined, websiteStatus: "unchecked", provenance: { ...p.provenance, website: { source: "manual", confidence: "verified" } }, websiteCheck: p.websiteCheck && { ...p.websiteCheck, candidates: p.websiteCheck.candidates?.filter((c) => c.url !== url), note: "Chosen by your team from the possible websites." }, updatedAt: new Date().toISOString() };
+    void act.analyze(act.reevaluate(next)).catch((e: Error) => setErr(e.message));
   };
   const del = () => { if (confirm(`Remove ${p.name} from the lead database?`)) { act.remove([p.id]); router.push("/lead-finder/database"); } };
 
@@ -125,10 +140,13 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
 
           <Card>
             <CardHeader title="Website audit" sub={p.audit ? `Checked ${new Date(p.audit.analyzedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}` : p.website ? "Not checked yet" : "No website found"}
-              action={p.website && <div className="no-print flex gap-1.5">
+              action={<div className="no-print flex flex-wrap gap-1.5">
+                <Btn size="sm" variant="outline" disabled={!!busy} onClick={() => void recheckWebsite()} title="Checks the Google listing's link and searches Google for the business's current site"><Globe size={13} className={busy === "resolve" ? "animate-pulse" : ""} /> {p.website ? "Confirm website" : "Find website"}</Btn>
+                {p.website && <>
                 <Link href={`/lead-finder/audit?url=${encodeURIComponent(p.website)}&prospect=${p.id}`}><Btn size="sm"><ScanSearch size={13} /> Deep audit</Btn></Link>
                 <Btn size="sm" variant="outline" disabled={!!busy} onClick={() => void analyze(false)}><RefreshCw size={13} className={busy === "analyze" ? "animate-spin" : ""} /> {p.audit ? "Re-check" : "Analyze"}</Btn>
                 {pagespeedOn && <Btn size="sm" variant="outline" disabled={!!busy} onClick={() => void analyze(true)} title="Google PageSpeed, mobile (~30s)"><Gauge size={13} className={busy === "pagespeed" ? "animate-pulse" : ""} /> PageSpeed</Btn>}
+                </>}
               </div>} />
             <div className="p-5">
               {p.deepAudit && (
@@ -140,6 +158,7 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
                   <span className="text-[12.5px] font-medium text-accent">View report →</span>
                 </Link>
               )}
+              <WebsiteCheckView p={p} onUse={useWebsite} />
               <AuditView p={p} />
             </div>
           </Card>
@@ -323,5 +342,30 @@ function EditContact({ open, p, onClose, onSave }: { open: boolean; p: Prospect;
       </div>
       <p className="mt-3 text-[12px] text-subtle">Edited values are marked as manually verified by your team.</p>
     </Modal>
+  );
+}
+
+function WebsiteCheckView({ p, onUse }: { p: Prospect; onUse: (url: string) => void }) {
+  const c = p.websiteCheck;
+  if (!c || (!c.note && !c.listingIssue && !c.candidates?.length)) return null;
+  return (
+    <div className="mb-4 space-y-2.5 rounded-xl border border-line bg-surface-2/40 px-4 py-3 text-[13px]">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-subtle">Which website is theirs · checked {new Date(c.at).toLocaleDateString("en-IN")}</div>
+      {c.listingIssue && (
+        <div className="flex gap-2"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-500" /><div className="min-w-0 break-words">{c.listingIssue}{c.listingWebsite && <> <ExtLink href={/^https?:/.test(c.listingWebsite) ? c.listingWebsite : `https://${c.listingWebsite}`}>Open listed link</ExtLink></>}</div></div>
+      )}
+      {c.note && <div className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-green-600" /><div className="min-w-0 break-words">{c.note}{p.provenance.website?.confidence === "estimated" && " Please confirm before reaching out."}</div></div>}
+      {!!c.candidates?.length && (
+        <div className="space-y-1.5">
+          <div className="text-[12px] text-muted">Possible websites that couldn&apos;t be confirmed. Open them and pick one only if it&apos;s clearly this business:</div>
+          {c.candidates.map((x) => (
+            <div key={x.url} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-surface px-3 py-2">
+              <div className="min-w-0 break-words"><ExtLink href={x.url}>{x.title || x.url.replace(/^https?:\/\/(www\.)?/, "")}</ExtLink><div className="text-[11.5px] text-subtle">{x.reason}</div></div>
+              <Btn size="sm" variant="outline" className="no-print" onClick={() => onUse(x.url)}>Use this website</Btn>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

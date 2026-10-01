@@ -32,6 +32,7 @@ export const CITY_COORDS: Record<string, [number, number]> = {
 export const SIGNALS: Record<Signal, { label: string; kind: "opportunity" | "strength" | "context" }> = {
   no_website: { label: "No website", kind: "opportunity" },
   website_unreachable: { label: "Website not loading", kind: "opportunity" },
+  listing_old_website: { label: "Google listing links to wrong site", kind: "opportunity" },
   outdated_website: { label: "Outdated website", kind: "opportunity" },
   basic_website: { label: "Basic website", kind: "opportunity" },
   strong_website: { label: "Strong website", kind: "strength" },
@@ -93,7 +94,7 @@ export const DEFAULT_SERVICE_INTEL: Record<string, Intel> = {
     minBudget: 40000, maxBudget: 100000,
   },
   s8: {
-    signals: ["slow_website", "weak_seo", "no_https", "not_mobile_friendly"],
+    signals: ["slow_website", "weak_seo", "no_https", "not_mobile_friendly", "listing_old_website"],
     idealIndustries: [],
     minBudget: 8000, maxBudget: 25000,
   },

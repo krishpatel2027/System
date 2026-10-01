@@ -1,4 +1,5 @@
-import type { Confidence, Prospect, SavedSearch, SearchQuery, SourceId } from "../types";
+import type { Confidence, Prospect, SavedSearch, SearchQuery, SourceId, WebsiteAudit } from "../types";
+import type { ResolveResult } from "./server/resolve";
 import { uid } from "../utils";
 
 type Fields = Partial<Omit<Prospect, "id" | "sources" | "provenance" | "signals" | "evidence" | "status" | "discoveredAt" | "updatedAt" | "websiteStatus">>;
@@ -101,4 +102,51 @@ export function describeQuery(q: SearchQuery, services: { id: string; name: stri
     q.minRating ? `${q.minRating}★+` : "",
     !q.industries.length && q.text ? `“${q.text}”` : "",
   ].filter(Boolean).join(" · ");
+}
+
+// Adds what the website itself publishes (contact, socials) as "detected" data.
+export function applyAudit(p: Prospect, audit: WebsiteAudit): Prospect {
+  const out: Prospect = { ...p, audit, provenance: { ...p.provenance }, socials: { ...p.socials } };
+  if (!audit.ok) return out;
+  const det = { source: "website" as const, confidence: "detected" as const };
+  if (!out.phone && audit.found.phones[0]) { out.phone = audit.found.phones[0]; out.provenance.phone = det; }
+  if (!out.email && audit.found.emails[0]) { out.email = audit.found.emails[0]; out.provenance.email = det; }
+  if (!out.whatsapp && audit.found.whatsapp) {
+    const num = audit.found.whatsapp.match(/(?:wa\.me\/|phone=)(\d{10,15})/)?.[1];
+    if (num) { out.whatsapp = `+${num}`; out.provenance.whatsapp = det; }
+  }
+  for (const [k, v] of Object.entries(audit.found.socials)) {
+    const key = k as keyof Prospect["socials"];
+    if (v && !out.socials[key]) { out.socials[key] = v; out.provenance[`social.${k}`] = det; }
+  }
+  if (!out.description && audit.found.description) { out.description = audit.found.description; out.provenance.description = det; }
+  if (!out.sources.includes("website")) out.sources = [...out.sources, "website"];
+  if (audit.pagespeed && !out.sources.includes("pagespeed")) out.sources = [...out.sources, "pagespeed"];
+  return out;
+}
+
+const siteKey = (u?: string) => { try { return new URL(/^https?:\/\//i.test(u ?? "") ? u! : `https://${u}`).hostname.replace(/^www\./, ""); } catch { return ""; } };
+
+// Applies a website check: the confirmed website (or none), missing contact
+// details from the place listing, and the audit of the site that was chosen.
+// A website your team entered by hand is never replaced.
+export function applyResolution(p: Prospect, r: ResolveResult): Prospect {
+  let out: Prospect = { ...p, provenance: { ...p.provenance }, websiteCheck: r.check };
+  const addSource = (s: SourceId) => { if (!out.sources.includes(s)) out.sources = [...out.sources, s]; };
+  if (r.detailsSource) {
+    if (r.phone && !out.phone) { out.phone = r.phone; out.provenance.phone = { source: r.detailsSource, confidence: "verified" }; }
+    if (r.address && !out.address) { out.address = r.address; out.provenance.address = { source: r.detailsSource, confidence: "verified" }; }
+  }
+  const manual = p.provenance.website?.source === "manual";
+  if (!manual && (r.website ?? "") !== (p.website ?? "")) {
+    out.website = r.website;
+    if (r.website) out.provenance.website = { source: r.websiteSource ?? "website", confidence: r.websiteConfidence ?? "detected" };
+    else delete out.provenance.website;
+    if (r.websiteSource === "web_search") addSource("web_search");
+    out.audit = undefined;
+    out.websiteStatus = r.website ? "unchecked" : "none";
+  }
+  const site = siteKey(out.website);
+  if (r.audit && site && [r.audit.url, r.audit.finalUrl].some((u) => siteKey(u) === site)) out = applyAudit(out, r.audit);
+  return out;
 }

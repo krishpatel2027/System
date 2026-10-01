@@ -172,6 +172,7 @@ interface SerpResponse {
   local_results?: SerpPlace[];
   place_results?: SerpPlace;
   serpapi_pagination?: { next?: string };
+  organic_results?: { link?: string; title?: string }[];
 }
 
 const serpKey = () => envKey("SERPAPI_API_KEY", "SERPAPI_KEY");
@@ -288,6 +289,7 @@ interface SearchApiResponse {
   local_results?: SearchApiPlace[];
   place_result?: SearchApiPlace;
   place_results?: SearchApiPlace;
+  organic_results?: { link?: string; title?: string }[];
 }
 
 const SEARCHAPI = "https://www.searchapi.io/api/v1/search";
@@ -355,12 +357,49 @@ export const searchApi: LeadProvider = {
 export const PROVIDERS: LeadProvider[] = [googlePlaces, serpApi, searchApi];
 export const activeProvider = () => PROVIDERS.find((p) => p.connected()) ?? null;
 
+// ---------- Google web search (website discovery) ----------
+// Used to look for a business's own website when its Maps listing has none,
+// links to a directory page, or links to an old/broken site. Only SearchApi
+// and SerpApi offer it; Google Places has no web search.
+
+export interface WebResult { link: string; title?: string }
+export interface WebSearcher { id: "searchapi" | "serpapi"; name: string; search(q: string): Promise<WebResult[]> }
+
+const organic = (list?: { link?: string; title?: string }[]): WebResult[] =>
+  (list ?? []).filter((r): r is WebResult => typeof r.link === "string" && /^https?:\/\//i.test(r.link)).map((r) => ({ link: r.link, title: r.title }));
+
+const searchApiWeb: WebSearcher = {
+  id: "searchapi",
+  name: "SearchApi.io",
+  async search(q) {
+    return organic((await searchApiFetch({ engine: "google", q, gl: "in", hl: "en", num: "10" })).organic_results);
+  },
+};
+const serpApiWeb: WebSearcher = {
+  id: "serpapi",
+  name: "SerpApi",
+  async search(q) {
+    const url = new URL("https://serpapi.com/search.json");
+    url.search = new URLSearchParams({ engine: "google", q, gl: "in", hl: "en", google_domain: "google.co.in", num: "10" }).toString();
+    return organic((await serpFetch(url)).organic_results);
+  },
+};
+
+// Same service as the active provider when possible, so one key covers both.
+export function webSearcher(): WebSearcher | null {
+  const options = [
+    { on: searchApi.connected(), w: searchApiWeb },
+    { on: serpApi.connected(), w: serpApiWeb },
+  ].filter((o) => o.on).map((o) => o.w);
+  return options.find((w) => w.id === activeProvider()?.id) ?? options[0] ?? null;
+}
+
 export function integrations(): ProviderInfo[] {
   return [
     { id: "google_places", name: "Google Places", connected: googlePlaces.connected(), envVar: "GOOGLE_PLACES_API_KEY", note: "Business discovery (official Google API): name, category, address, phone, website, rating, reviews." },
     { id: "serpapi", name: "SerpApi — Google Maps", connected: serpApi.connected(), envVar: "SERPAPI_API_KEY", note: `Alternative business discovery from Google Maps results.${serpApi.connected() ? ` Key: ${keyHint(serpKey())}${serpKey().length !== 64 ? " — SerpApi keys are normally 64 characters, check it was copied fully" : ""}.` : ""}${googlePlaces.connected() && serpApi.connected() ? " Google Places is used while both are set." : ""}` },
     { id: "searchapi", name: "SearchApi.io — Google Maps", connected: searchApi.connected(), envVar: "SEARCHAPI_API_KEY", note: `Alternative business discovery from Google Maps results.${searchApi.connected() ? ` Key: ${keyHint(searchApiKey())}.` : ""}${searchApi.connected() && (googlePlaces.connected() || serpApi.connected()) ? ` ${googlePlaces.connected() ? "Google Places" : "SerpApi"} is used while both are set.` : ""}` },
-    { id: "website", name: "Website analyzer", connected: true, note: "Built in. Reads public homepages and respects robots.txt." },
+    { id: "website", name: "Website analyzer", connected: true, note: `Built in. Reads public homepages and respects robots.txt.${webSearcher() ? ` When a Google listing has no website, links to a directory page, or links to an old or broken site, it also searches Google (via ${webSearcher()!.name}, one search credit each) for the business's current site and only uses one that shows the listing's phone number or clearly matches its name and city.` : " Add a SearchApi.io or SerpApi key to also look up websites that Google listings are missing or link to wrongly."}` },
     { id: "pagespeed", name: "Google PageSpeed", connected: !!(process.env.GOOGLE_PAGESPEED_API_KEY ?? "").trim(), envVar: "GOOGLE_PAGESPEED_API_KEY", note: "Optional. Adds Google's mobile performance score to audits." },
     { id: "claude", name: "Claude AI", connected: !!(process.env.ANTHROPIC_API_KEY ?? "").trim(), envVar: "ANTHROPIC_API_KEY", note: "Optional. Smarter search parsing and personalised outreach drafts. Rule-based fallback otherwise." },
   ];

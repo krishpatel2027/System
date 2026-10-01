@@ -5,9 +5,10 @@ import { serverLoad, serverSave } from "../../server-store";
 import { DedupeIndex } from "../dedupe";
 import { evaluate } from "../engine";
 import { providerQueries } from "../nlp";
-import { isDue, mergeInto, passesQuery } from "../prospect";
+import { applyResolution, isDue, mergeInto, passesQuery } from "../prospect";
 import { activeProvider, ProviderError, type LeadProvider } from "./providers";
 import { analyzeWebsite } from "./analyzer";
+import { resolveWebsite } from "./resolve";
 
 // Server-side discovery, used by AUTO FIND (cron). The in-app FIND LEADS flow
 // runs the same steps from the browser so it can show live progress.
@@ -52,10 +53,20 @@ export async function runSavedSearch(db: DB, s: SavedSearch, deadline: number): 
     idx.add(p);
     fresh.push({ ...p, searchId: s.id });
   }
-  // Check websites while time allows; the rest stay "unchecked" for later.
-  await pool(fresh.filter((p) => p.website), 4, async (p) => {
+  // Confirm websites while time allows; the rest stay "unchecked" for later.
+  let searchesLeft = 10;
+  await pool(fresh, 4, async (p) => {
     if (Date.now() > deadline) return;
-    p.audit = await analyzeWebsite(p.website!);
+    const input = { name: p.name, city: p.city, address: p.address, phone: p.phone, website: p.website, placeId: p.placeId };
+    try {
+      let r;
+      try { r = await resolveWebsite({ ...input, allowSearch: searchesLeft > 0 }); }
+      catch (e) { if (!(e instanceof ProviderError)) throw e; searchesLeft = 0; r = await resolveWebsite({ ...input, allowSearch: false }); }
+      if (r.check.searched) searchesLeft--;
+      Object.assign(p, applyResolution(p, r));
+    } catch {
+      if (p.website) p.audit = await analyzeWebsite(p.website);
+    }
   });
   const evaluated = fresh.map((p) => evaluate(p, db.services, db.finder.scoring));
   const kept = evaluated.filter((p) => passesQuery(p, { ...s.query, minScore: Math.max(s.query.minScore, 0) }));

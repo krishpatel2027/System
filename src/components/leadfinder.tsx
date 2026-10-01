@@ -14,6 +14,7 @@ export const SOURCE_LABEL: Record<SourceId, string> = {
   google_places: "Google Business listing",
   serpapi: "Google Maps listing (via SerpApi)",
   searchapi: "Google Maps listing (via SearchApi.io)",
+  web_search: "Google web search, confirmed on the site",
   website: "Business website",
   pagespeed: "Google PageSpeed",
   csv: "CSV import",

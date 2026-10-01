@@ -39,11 +39,14 @@ export function deriveSignals(p: Prospect): { signals: Signal[]; evidence: Parti
   const ev: Partial<Record<Signal, string>> = {};
   const add = (s: Signal, why: string) => { if (!ev[s]) ev[s] = why; };
   const a = p.audit;
+  if (p.websiteCheck?.listingIssue) add("listing_old_website", `${p.websiteCheck.listingIssue}${p.website ? ` The current site appears to be ${host(p.website)}.` : ""}`);
   let websiteStatus: WebsiteStatus = p.website ? "unchecked" : "none";
 
   if (!p.website) {
     const where = p.sources.some((s) => s === "google_places" || s === "serpapi" || s === "searchapi") ? "its Google Business listing" : p.sources.includes("csv") ? "the imported record" : "the lead record";
-    add("no_website", `No website listed on ${where}.`);
+    add("no_website", p.websiteCheck?.searched
+      ? `No website${p.websiteCheck.listingWebsite ? " of its own" : ""} on ${where}, and a Google search for the business found none that could be confirmed as theirs.`
+      : `No website listed on ${where}.`);
   } else if (a) {
     websiteStatus = classifyAudit(a);
     const byId = (id: string) => a.findings.find((f) => f.id === id);

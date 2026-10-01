@@ -309,6 +309,7 @@ export interface Comm {
 export type Signal =
   | "no_website"
   | "website_unreachable"
+  | "listing_old_website"
   | "outdated_website"
   | "basic_website"
   | "strong_website"
@@ -328,7 +329,7 @@ export type Signal =
   | "tech_business";
 
 export type Confidence = "verified" | "detected" | "estimated" | "not_found";
-export type SourceId = "google_places" | "serpapi" | "searchapi" | "website" | "pagespeed" | "csv" | "manual";
+export type SourceId = "google_places" | "serpapi" | "searchapi" | "web_search" | "website" | "pagespeed" | "csv" | "manual";
 export type WebsiteStatus = "none" | "unreachable" | "outdated" | "basic" | "good" | "unchecked";
 export type ProspectStatus = "new" | "reviewing" | "qualified" | "not_fit";
 
@@ -424,8 +425,19 @@ export interface Prospect {
   notes?: string;
   searchId?: string;
   deepAudit?: { id: string; at: string; overall: number | null; opportunity: number; service?: string };
+  // How the website above was confirmed, and what was set aside on the way.
+  websiteCheck?: WebsiteCheck;
   discoveredAt: string;
   updatedAt: string;
+}
+
+export interface WebsiteCheck {
+  at: string;
+  searched: boolean;               // a Google web search was run for the business
+  note?: string;                   // how the current website was confirmed
+  listingWebsite?: string;         // what the Google listing links to, when it isn't used
+  listingIssue?: string;           // why it wasn't used (old, broken, directory page…)
+  candidates?: { url: string; title?: string; reason: string }[]; // possible sites that couldn't be confirmed
 }
 
 export interface SearchQuery {

@@ -21,6 +21,12 @@ const ANGLES: Partial<Record<Signal, (p: Prospect) => Angle>> = {
     observation: `I came across ${p.name}${p.city ? ` in ${p.city}` : ""}${p.reviewCount ? ` — ${p.reviewCount} Google reviews${p.rating ? ` at ${p.rating.toFixed(1)}★` : ""} is a strong reputation` : ""}, but I couldn't find a website for the business.`,
     opportunity: "People who search for you online currently have nowhere to see your work, compare options or enquire.",
   }),
+  listing_old_website: (p) => ({
+    observation: p.website
+      ? `I noticed the website button on your Google listing goes to ${host(p.websiteCheck?.listingWebsite)} rather than ${host(p.website)}.`
+      : `I noticed the website button on your Google listing goes to ${host(p.websiteCheck?.listingWebsite)} rather than a site of your own.`,
+    opportunity: "People who find you on Google Maps may be landing on the wrong page before they ever see your current work.",
+  }),
   website_unreachable: (p) => ({
     observation: `I tried visiting ${host(p.website)} and it didn't load for me.`,
     opportunity: "Anyone clicking through from Google or Instagram may be hitting the same wall and leaving.",
@@ -92,7 +98,7 @@ const topIssue = (p: Prospect) => {
 };
 const seoIssue = (p: Prospect) => p.audit?.findings.filter((f) => f.category === "seo").slice(0, 2).map((f) => f.issue.toLowerCase()).join(" and ");
 
-const ORDER: Signal[] = ["no_website", "website_unreachable", "no_online_store", "outdated_website", "not_mobile_friendly", "slow_website", "no_cta", "weak_seo", "basic_website", "support_heavy", "booking_business", "tech_business"];
+const ORDER: Signal[] = ["no_website", "website_unreachable", "listing_old_website", "no_online_store", "outdated_website", "not_mobile_friendly", "slow_website", "no_cta", "weak_seo", "basic_website", "support_heavy", "booking_business", "tech_business"];
 
 export function angleFor(p: Prospect): Angle {
   const serviceSignals = new Set(p.match ? ORDER.filter((s) => p.signals.includes(s)) : []);

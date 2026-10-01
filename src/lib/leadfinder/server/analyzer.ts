@@ -30,7 +30,7 @@ const SOCIAL: [keyof WebsiteAudit["found"]["socials"], RegExp][] = [
 
 // Tags become spaces so adjacent elements never fuse into one "word" (which
 // could otherwise produce emails or phone numbers that aren't on the page).
-function visibleText(markup: string) {
+export function visibleText(markup: string) {
   return markup
     .replace(/<(script|style|noscript|template|svg)\b[\s\S]*?<\/\1>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
