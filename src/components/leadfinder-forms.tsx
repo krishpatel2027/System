@@ -3,7 +3,8 @@ import React, { useState } from "react";
 import { X } from "lucide-react";
 import type { SearchQuery } from "@/lib/types";
 import { INDUSTRIES } from "@/lib/leadfinder/catalog";
-import { MARKETS, MARKET_GROUPS, MARKET_LIST, marketOf } from "@/lib/leadfinder/markets";
+import { CITIES } from "@/lib/leadfinder/catalog";
+import { FOREIGN_GROUPS, FOREIGN_MARKETS, MARKETS, marketOf, type Region } from "@/lib/leadfinder/markets";
 import { Field, inputCls } from "@/components/ui";
 
 export function ChipsInput({ values, onChange, options, placeholder, id }: { values: string[]; onChange: (v: string[]) => void; options: string[]; placeholder: string; id: string }) {
@@ -34,19 +35,21 @@ export function ChipsInput({ values, onChange, options, placeholder, id }: { val
   );
 }
 
-const ALL_PLACES = MARKET_LIST.flatMap((m) => m.cities.map((c) => c.name));
+const FOREIGN_PLACES = FOREIGN_MARKETS.flatMap((m) => m.cities.map((c) => c.name));
 
-export function QueryFilters({ q, set, services }: { q: SearchQuery; set: (patch: Partial<SearchQuery>) => void; services: { id: string; name: string }[] }) {
+export function QueryFilters({ q, set, services, region }: { q: SearchQuery; set: (patch: Partial<SearchQuery>) => void; services: { id: string; name: string }[]; region: Region }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <div className="sm:col-span-2"><Field label="Locations" hint="Add several — each is searched separately."><ChipsInput id="lf-cities" values={q.locations} onChange={(v) => set({ locations: v })} options={marketOf(q.country)?.cities.map((c) => c.name) ?? ALL_PLACES} placeholder={q.country && q.country !== "IN" ? `${marketOf(q.country)?.cities[0]?.name ?? "City"}…` : "Ahmedabad, Dubai, Austin…"} /></Field></div>
+      <div className="sm:col-span-2"><Field label="Locations" hint="Add several — each is searched separately."><ChipsInput id="lf-cities" values={q.locations} onChange={(v) => set({ locations: v })} options={region === "in" ? CITIES : marketOf(q.country)?.cities.map((c) => c.name) ?? FOREIGN_PLACES} placeholder={region === "in" ? "Ahmedabad, Surat…" : q.country ? `${marketOf(q.country)?.cities[0]?.name ?? "City"}…` : "Austin, Dubai, London…"} /></Field></div>
       <div className="sm:col-span-2"><Field label="Industries" hint="Pick from the list or type your own."><ChipsInput id="lf-inds" values={q.industries} onChange={(v) => set({ industries: v })} options={INDUSTRIES} placeholder="Real Estate, Clinics…" /></Field></div>
-      <Field label="Country" hint="Auto uses the place you type. Pick one for places that exist in several countries.">
-        <select className={inputCls} value={q.country ?? ""} onChange={(e) => set({ country: e.target.value || undefined })}>
-          <option value="">Auto-detect</option>
-          {MARKET_GROUPS.map((g) => <optgroup key={g.label} label={g.label}>{g.codes.map((c) => <option key={c} value={c}>{MARKETS[c].name}</option>)}</optgroup>)}
-        </select>
-      </Field>
+      {region === "intl" && (
+        <Field label="Country" hint="Auto-detect uses the place you type. Pick one for places that exist in several countries.">
+          <select className={inputCls} value={q.country ?? ""} onChange={(e) => set({ country: e.target.value || undefined })}>
+            <option value="">Auto-detect</option>
+            {FOREIGN_GROUPS.map((g) => <optgroup key={g.label} label={g.label}>{g.codes.map((c) => <option key={c} value={c}>{MARKETS[c].name}</option>)}</optgroup>)}
+          </select>
+        </Field>
+      )}
       <Field label="Website">
         <select className={inputCls} value={q.website} onChange={(e) => set({ website: e.target.value as SearchQuery["website"] })}>
           <option value="any">Any</option><option value="none">No website</option><option value="weak">Weak / outdated website</option><option value="none_or_weak">No or weak website</option><option value="has">Has a website</option>

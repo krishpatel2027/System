@@ -1,5 +1,5 @@
 "use client";
-import React, { use, useState } from "react";
+import React, { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowLeft, ScanSearch, Check, Clock, Copy, FileDown, Gauge, AtSign, Globe, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, RefreshCw, Sparkles, Star, Target, Trash2, UserRound } from "lucide-react";
@@ -9,7 +9,8 @@ import type { ResolveResult } from "@/lib/leadfinder/server/resolve";
 import { SIGNALS } from "@/lib/leadfinder/catalog";
 import { opportunityLabel } from "@/lib/leadfinder/engine";
 import { CHANNELS, miniAudit, outreach, preferredChannel, priceText, waLink, type Channel } from "@/lib/leadfinder/outreach";
-import { MARKETS, dialDigits, isForeign, marketOf } from "@/lib/leadfinder/markets";
+import { MARKETS, REGION_LABEL, dialDigits, isForeign, marketOf, regionOf } from "@/lib/leadfinder/markets";
+import { setRegion } from "@/lib/leadfinder/region";
 import { applyResolution, lfApi, useFinderStatus, useProspectActions } from "@/lib/leadfinder/client";
 import { STAGES } from "@/lib/stages";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,9 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
   const [err, setErr] = useState<string | null>(null);
   const [edit, setEdit] = useState(false);
   const cfg = db.finder.scoring;
+  // Opening a lead shows its own region in the Lead Finder tabs and back links.
+  const leadRegion = regionOf(p);
+  useEffect(() => { setRegion(leadRegion); }, [leadRegion]);
   const lead = db.leads.find((l) => l.prospectId === p.id || l.id === p.leadId);
   const op = opportunityLabel(p.score?.total, cfg);
   const pagespeedOn = !!status?.integrations.find((i) => i.id === "pagespeed")?.connected;
@@ -96,7 +100,7 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
         <div className="relative flex flex-wrap items-start gap-5">
           <ScoreRing score={p.score?.total} cfg={cfg} size={84} />
           <div className="min-w-0 flex-1">
-            <div className="text-[12px] font-medium text-subtle">Arkria Opportunity Score · {op.label}</div>
+            <div className="text-[12px] font-medium text-subtle">Arkria Opportunity Score · {op.label} · {REGION_LABEL[leadRegion]}</div>
             <h1 className="mt-0.5 text-[26px] font-semibold leading-tight tracking-[-0.02em]">{p.name}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted">
               <span>{p.industry || p.category || "Industry not set"}</span>

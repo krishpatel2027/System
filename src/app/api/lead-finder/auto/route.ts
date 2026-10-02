@@ -29,9 +29,9 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const blocked = gate(req);
   if (blocked) return blocked;
-  const b = await body<{ savedSearchId?: string }>(req);
+  const b = await body<{ savedSearchId?: string; region?: string }>(req);
   try {
-    return json(await runAutoFind({ force: b?.savedSearchId }));
+    return json(await runAutoFind({ force: b?.savedSearchId, region: b?.region === "intl" ? "intl" : b?.region === "in" ? "in" : undefined }));
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }

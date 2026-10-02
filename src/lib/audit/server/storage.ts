@@ -6,7 +6,7 @@ import type { AuditRecord, AuditSummary } from "../types";
 // Audit reports live beside the workspace, one record per audit:
 // ./data/audits/<id>.json on the file backend, the arkria_audits table on Supabase.
 
-export interface AuditListItem { id: string; url: string; domain: string; createdAt: string; prospectId?: string; summary: AuditSummary }
+export interface AuditListItem { id: string; url: string; domain: string; createdAt: string; prospectId?: string; country?: string; summary: AuditSummary }
 
 const ID_RE = /^au_[a-z0-9_]{6,60}$/;
 export const validId = (id: string) => ID_RE.test(id);
@@ -21,7 +21,7 @@ async function readIndex(): Promise<AuditListItem[]> {
 let lock: Promise<unknown> = Promise.resolve();
 const locked = <T>(fn: () => Promise<T>): Promise<T> => { const run = lock.then(fn, fn); lock = run.catch(() => {}); return run; };
 
-const item = (r: AuditRecord): AuditListItem => ({ id: r.id, url: r.url, domain: r.domain, createdAt: r.createdAt, prospectId: r.prospectId, summary: r.summary });
+const item = (r: AuditRecord): AuditListItem => ({ id: r.id, url: r.url, domain: r.domain, createdAt: r.createdAt, prospectId: r.prospectId, country: r.country, summary: r.summary });
 
 // ---------- Supabase ----------
 

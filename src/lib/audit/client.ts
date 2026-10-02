@@ -206,7 +206,7 @@ export function prospectFromAudit(rec: AuditRecord, result: AuditResult, d: DB):
   const emails = [...new Set(rec.raw.pages.flatMap((p) => p.contact.emails))];
   const wa = rec.raw.pages.map((p) => p.contact.whatsapp).find(Boolean)?.match(/(?:wa\.me\/|phone=)(\d{10,15})/)?.[1];
   const addr = rec.raw.pages.map((p) => p.contact.address).find(Boolean);
-  const p = newProspect({ name: businessName(rec.raw), industry: INDUSTRY_OF[result.business.type] ?? "", website: rec.url, address: addr, socials: {} }, "website", "detected");
+  const p = newProspect({ name: businessName(rec.raw), industry: INDUSTRY_OF[result.business.type] ?? "", website: rec.url, address: addr, country: rec.country, socials: {} }, "website", "detected");
   if (phones[0]) { p.phone = phones[0]; p.provenance.phone = { source: "website", confidence: "detected" }; }
   if (emails[0]) { p.email = emails[0]; p.provenance.email = { source: "website", confidence: "detected" }; }
   if (wa) { p.whatsapp = `+${wa}`; p.provenance.whatsapp = { source: "website", confidence: "detected" }; }

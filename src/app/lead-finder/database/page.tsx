@@ -11,7 +11,8 @@ import { STAGES } from "@/lib/stages";
 import { cn, inr } from "@/lib/utils";
 import { Badge, Btn, Empty, inputCls, PageHeader, Progress, Tabs } from "@/components/ui";
 import { FinderTabs, ProspectCard, ScoreRing, WebsiteBadge, prospectStatus } from "@/components/leadfinder";
-import { MARKETS, isForeign, marketOf } from "@/lib/leadfinder/markets";
+import { MARKETS, REGION_LABEL, isForeign, marketOf, regionOf } from "@/lib/leadfinder/markets";
+import { useRegion } from "@/lib/leadfinder/region";
 
 type Sort = "score" | "newest" | "reviews" | "value" | "name";
 
@@ -20,6 +21,8 @@ function DatabaseInner() {
   const params = useSearchParams();
   const act = useProspectActions();
   const cfg = db.finder.scoring;
+  const region = useRegion();
+  const prospects = useMemo(() => db.prospects.filter((p) => regionOf(p) === region), [db.prospects, region]);
   const [text, setText] = useState("");
   const [industry, setIndustry] = useState("");
   const [city, setCity] = useState("");
@@ -34,14 +37,14 @@ function DatabaseInner() {
   const [selected, setSelected] = useState<string[]>([]);
   const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
 
-  const industries = useMemo(() => [...new Set(db.prospects.map((p) => p.industry).filter(Boolean))].sort(), [db.prospects]);
-  const countries = useMemo(() => [...new Set(db.prospects.map((p) => p.country ?? "IN"))].sort(), [db.prospects]);
-  const cities = useMemo(() => [...new Set(db.prospects.map((p) => p.city).filter((c): c is string => !!c))].sort(), [db.prospects]);
+  const industries = useMemo(() => [...new Set(prospects.map((p) => p.industry).filter(Boolean))].sort(), [prospects]);
+  const countries = useMemo(() => [...new Set(prospects.map((p) => p.country ?? "IN"))].sort(), [prospects]);
+  const cities = useMemo(() => [...new Set(prospects.map((p) => p.city).filter((c): c is string => !!c))].sort(), [prospects]);
   const leadOf = useMemo(() => new Map(db.leads.filter((l) => l.prospectId).map((l) => [l.prospectId!, l])), [db.leads]);
 
   const list = useMemo(() => {
     const t = text.trim().toLowerCase();
-    const out = db.prospects.filter((p) => {
+    const out = prospects.filter((p) => {
       if (t && !`${p.name} ${p.industry} ${p.city} ${p.area} ${p.country ?? ""} ${marketOf(p.country)?.name ?? ""} ${p.website} ${p.category}`.toLowerCase().includes(t)) return false;
       if (industry && p.industry !== industry) return false;
       if (city && p.city !== city) return false;
@@ -61,7 +64,7 @@ function DatabaseInner() {
       name: (a, b) => a.name.localeCompare(b.name),
     };
     return out.sort(by[sort]);
-  }, [db.prospects, text, industry, city, country, site, status, service, minScore, contact, sort, leadOf]);
+  }, [prospects, text, industry, city, country, site, status, service, minScore, contact, sort, leadOf]);
 
   const chosen = list.filter((p) => selected.includes(p.id));
   const target = chosen.length ? chosen : list;
@@ -80,11 +83,14 @@ function DatabaseInner() {
   };
 
   const unchecked = target.filter((p) => p.website && !p.audit).length;
-  const reset = () => { setText(""); setIndustry(""); setCity(""); setCountry(""); setSite(""); setStatus(""); setService(""); setMinScore(0); setContact(false); };
+  const reset = () => { setText(""); setIndustry(""); setCity(""); setCountry(""); setSite(""); setStatus(""); setService(""); setMinScore(0); setContact(false); setSelected([]); };
+  // Filters and selection belong to one region; switching starts clean.
+  const [shownRegion, setShownRegion] = useState(region);
+  if (shownRegion !== region) { setShownRegion(region); reset(); }
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Lead Finder" title="Lead database" description={`${db.prospects.length} businesses · ${db.prospects.filter((p) => (p.score?.total ?? 0) >= cfg.qualified).length} qualified · every fact labelled with its source`} />
+      <PageHeader eyebrow={`Lead Finder · ${REGION_LABEL[region]}`} title="Lead database" description={`${prospects.length} ${REGION_LABEL[region]} businesses · ${prospects.filter((p) => (p.score?.total ?? 0) >= cfg.qualified).length} qualified · every fact labelled with its source`} />
       <FinderTabs />
 
       <div className="space-y-2">
@@ -94,7 +100,7 @@ function DatabaseInner() {
             <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, area, website…" className={cn(inputCls, "pl-8")} />
           </div>
           <select className={cn(inputCls, "w-auto")} value={industry} onChange={(e) => setIndustry(e.target.value)} aria-label="Industry"><option value="">All industries</option>{industries.map((i) => <option key={i}>{i}</option>)}</select>
-          {countries.length > 1 && <select className={cn(inputCls, "w-auto")} value={country} onChange={(e) => setCountry(e.target.value)} aria-label="Country"><option value="">All countries</option>{countries.map((c) => <option key={c} value={c}>{MARKETS[c as keyof typeof MARKETS]?.name ?? c}</option>)}</select>}
+          {region === "intl" && countries.length > 1 && <select className={cn(inputCls, "w-auto")} value={country} onChange={(e) => setCountry(e.target.value)} aria-label="Country"><option value="">All countries</option>{countries.map((c) => <option key={c} value={c}>{MARKETS[c as keyof typeof MARKETS]?.name ?? c}</option>)}</select>}
           <select className={cn(inputCls, "w-auto")} value={city} onChange={(e) => setCity(e.target.value)} aria-label="City"><option value="">All cities</option>{cities.map((c) => <option key={c}>{c}</option>)}</select>
           <select className={cn(inputCls, "w-auto")} value={site} onChange={(e) => setSite(e.target.value as typeof site)} aria-label="Website">
             <option value="">Any website</option><option value="none">No website</option><option value="weak">Weak / outdated</option><option value="outdated">Outdated</option><option value="basic">Basic</option><option value="good">Strong</option><option value="unchecked">Not checked</option><option value="unreachable">Not loading</option>
@@ -127,8 +133,8 @@ function DatabaseInner() {
         {bulk && <div className="w-full"><Progress value={(bulk.done / Math.max(1, bulk.total)) * 100} tone="accent" /><div className="mt-1 text-[11.5px] text-muted">Checking websites {bulk.done}/{bulk.total}</div></div>}
       </div>
 
-      {db.prospects.length === 0 ? (
-        <Empty icon={<Database size={18} />} title="Your lead database is empty" sub="Run a search in Discover, import a CSV, or add a business manually." action={<Link href="/lead-finder"><Btn>Go to Discover</Btn></Link>} />
+      {prospects.length === 0 ? (
+        <Empty icon={<Database size={18} />} title={`No ${REGION_LABEL[region]} leads yet`} sub={`Run a ${REGION_LABEL[region]} search in Discover, import a CSV, or add a business manually.`} action={<Link href="/lead-finder"><Btn>Go to Discover</Btn></Link>} />
       ) : list.length === 0 ? (
         <Empty icon={<Search size={18} />} title="No businesses match these filters" sub="Loosen a filter or reset them." action={<Btn variant="outline" onClick={reset}>Reset filters</Btn>} />
       ) : view === "grid" ? (

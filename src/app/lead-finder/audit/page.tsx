@@ -6,7 +6,9 @@ import { ArrowRight, Check, Gauge, Globe, MonitorSmartphone, Plus, ScanSearch, S
 import { useDB } from "@/lib/store";
 import { useAuditCapabilities, useAuditList, useDeepAudit } from "@/lib/audit/client";
 import { SCORE_KEYS } from "@/lib/audit/engine/report";
-import { cn, inr } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { FOREIGN_GROUPS, MARKETS, REGION_LABEL, moneyFor, regionOf } from "@/lib/leadfinder/markets";
+import { useRegion } from "@/lib/leadfinder/region";
 import { Badge, Btn, Card, CardHeader, Empty, inputCls, PageHeader, Tabs } from "@/components/ui";
 import { FinderTabs } from "@/components/leadfinder";
 import { ScoreCard, SevBadge, StageList, scoreTone } from "@/components/audit";
@@ -27,11 +29,16 @@ function AuditInner() {
   const [done, setDone] = useState<string | null>(null);
   const prospectId = params.get("prospect") ?? undefined;
   const prospect = prospectId ? db.prospects.find((p) => p.id === prospectId) : undefined;
+  const region = useRegion();
+  const [chosen, setChosen] = useState("");
+  // The lead's own country wins; otherwise India, or the country picked for an international audit.
+  const country = prospect?.country ?? (region === "in" ? "IN" : chosen || undefined);
+  const needCountry = region === "intl" && !country;
 
   const start = async () => {
-    if (!url.trim() || !caps) return;
+    if (!url.trim() || !caps || needCountry) return;
     setDone(null);
-    const id = await audit.run({ url: url.trim(), crawlLimit: limit, competitors: compare ? comps.map((c) => c.trim()).filter(Boolean).slice(0, 3) : [], prospectId, industryHint: prospect?.industry || params.get("industry") || undefined, country: prospect?.country }, caps);
+    const id = await audit.run({ url: url.trim(), crawlLimit: limit, competitors: compare ? comps.map((c) => c.trim()).filter(Boolean).slice(0, 3) : [], prospectId, industryHint: prospect?.industry || params.get("industry") || undefined, country }, caps);
     if (id) { setDone(id); list.reload(); setTimeout(() => router.push(`/lead-finder/audits/${id}`), 1200); }
   };
 
@@ -50,10 +57,20 @@ function AuditInner() {
             <Globe size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-subtle" />
             <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com" disabled={audit.running} className={cn(inputCls, "h-12 rounded-2xl pl-10 text-[15px]")} autoFocus={!url} />
           </div>
-          <Btn type="submit" variant="accent" disabled={audit.running || !url.trim() || !caps} className="h-12 px-6 text-[14px] font-semibold uppercase tracking-wide">
+          <Btn type="submit" variant="accent" disabled={audit.running || !url.trim() || !caps || needCountry} className="h-12 px-6 text-[14px] font-semibold uppercase tracking-wide">
             <ScanSearch size={16} /> {audit.running ? "Auditing…" : "Start deep audit"}
           </Btn>
         </form>
+        {region === "intl" && !prospect?.country && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[12.5px] text-muted">
+            <span>Country of the business</span>
+            <select className={cn(inputCls, "h-9 w-auto")} value={chosen} onChange={(e) => setChosen(e.target.value)} disabled={audit.running} aria-label="Country">
+              <option value="">Choose…</option>
+              {FOREIGN_GROUPS.map((g) => <optgroup key={g.label} label={g.label}>{g.codes.map((c) => <option key={c} value={c}>{MARKETS[c].name}</option>)}</optgroup>)}
+            </select>
+            <span className="text-subtle">So the audit, prices and outreach fit that market.</span>
+          </div>
+        )}
         {prospect && <div className="mt-2 text-[12.5px] text-muted">Linked to lead: <Link href={`/lead-finder/${prospect.id}`} className="font-medium text-accent">{prospect.name}</Link></div>}
 
         <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
@@ -134,22 +151,22 @@ function AuditInner() {
       )}
 
       <Card>
-        <CardHeader title="Recent audits" sub="Shared with your team" />
+        <CardHeader title="Recent audits" sub={`${REGION_LABEL[region]} audits · shared with your team`} />
         <div className="p-5">
-          {list.error ? <div className="text-[13px] text-red-600">{list.error}</div> : !list.items ? <div className="text-[13px] text-muted">Loading…</div> : list.items.length === 0 ? (
+          {list.error ? <div className="text-[13px] text-red-600">{list.error}</div> : !list.items ? <div className="text-[13px] text-muted">Loading…</div> : list.items.filter((a) => regionOf(a) === region).length === 0 ? (
             <Empty icon={<ScanSearch size={18} />} title="No audits yet" sub="Run your first deep audit above." />
           ) : (
             <div className="overflow-x-auto rounded-xl border border-line">
               <table className="w-full min-w-[640px] text-[13px]">
                 <thead><tr className="border-b border-line bg-surface-2/60 text-left text-[12px] text-muted"><th className="px-4 py-2 font-medium">Website</th><th className="px-3 py-2 font-medium">Audited</th><th className="px-3 py-2 text-right font-medium">Health</th><th className="px-3 py-2 text-right font-medium">Opportunity</th><th className="px-3 py-2 font-medium">Recommended</th><th className="w-10" /></tr></thead>
                 <tbody className="divide-y divide-line">
-                  {list.items.map((a) => (
+                  {list.items.filter((a) => regionOf(a) === region).map((a) => (
                     <tr key={a.id} className="hover:bg-surface-2/60">
                       <td className="px-4 py-2.5"><Link href={`/lead-finder/audits/${a.id}`} className="font-medium hover:text-accent">{a.domain}</Link><div className="text-[11.5px] text-subtle">{a.summary.pages} pages · {a.summary.high} high-priority issues</div></td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-muted">{new Date(a.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</td>
                       <td className={cn("px-3 py-2.5 text-right font-semibold tabular-nums", scoreTone(a.summary.overall))}>{a.summary.overall ?? "—"}</td>
                       <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-accent">{a.summary.opportunity}</td>
-                      <td className="px-3 py-2.5">{a.summary.service ? `${a.summary.service} · ${inr(a.summary.servicePrice ?? 0)}` : "—"}</td>
+                      <td className="px-3 py-2.5">{a.summary.service ? `${a.summary.service} · ${moneyFor(a.country, db.finder.fx).fmt(a.summary.servicePrice ?? 0)}` : "—"}</td>
                       <td className="px-2"><button onClick={() => confirm(`Delete the audit of ${a.domain}?`) && void list.remove(a.id)} className="rounded-lg p-1.5 text-subtle hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950" aria-label="Delete audit"><Trash2 size={14} /></button></td>
                     </tr>
                   ))}

@@ -7,7 +7,15 @@ import { lfApi, useDiscovery, useFinderStatus } from "@/lib/leadfinder/client";
 import { describeQuery, isDue } from "@/lib/leadfinder/prospect";
 import { cn } from "@/lib/utils";
 import { Badge, Btn, Card, CardHeader, Empty, inputCls, PageHeader } from "@/components/ui";
+import { REGION_LABEL, queryRegion, type Region } from "@/lib/leadfinder/markets";
+import { useRegion } from "@/lib/leadfinder/region";
 import { FinderTabs, ProgressStages, ProviderNotConnected } from "@/components/leadfinder";
+
+// Searches saved before countries existed have no country, so unrecognised places count as India.
+const inRegion = (q: Parameters<typeof queryRegion>[0], region: Region) => {
+  const r = queryRegion(q);
+  return r === "mixed" || (r === "unknown" ? "in" : r) === region;
+};
 
 const when = (iso?: string) => (iso ? new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "Never");
 
@@ -18,7 +26,9 @@ export default function SearchesPage() {
   const [runningId, setRunningId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
-  const saved = db.finder.savedSearches;
+  const region = useRegion();
+  const saved = db.finder.savedSearches.filter((s) => inRegion(s.query, region));
+  const history = db.finder.history.filter((h) => inRegion(h.query, region));
   const connected = status?.providerConnected;
   const due = saved.filter((s) => isDue(s));
 
@@ -36,7 +46,7 @@ export default function SearchesPage() {
   const runDue = async () => {
     setAutoBusy(true); setMsg(null);
     try {
-      const r = await lfApi<{ ran: number; added: number; message?: string; errors?: string[] }>("auto", {});
+      const r = await lfApi<{ ran: number; added: number; message?: string; errors?: string[] }>("auto", { region });
       setMsg(r.message ?? `Ran ${r.ran} saved ${r.ran === 1 ? "search" : "searches"} · ${r.added} new businesses${r.errors?.length ? ` · ${r.errors.join("; ")}` : ""}`);
       await refreshFromServer();
     } catch (e) { setMsg((e as Error).message); } finally { setAutoBusy(false); }
@@ -44,7 +54,7 @@ export default function SearchesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Lead Finder" title="Saved searches & auto find" description="Save the searches you run often. Scheduled ones run on their own and add only new, de-duplicated businesses." />
+      <PageHeader eyebrow={`Lead Finder · ${REGION_LABEL[region]}`} title="Saved searches & auto find" description="Save the searches you run often. Scheduled ones run on their own and add only new, de-duplicated businesses." />
       <FinderTabs />
       {status && !connected && <ProviderNotConnected compact />}
 
@@ -75,10 +85,10 @@ export default function SearchesPage() {
       {msg && <div className="rounded-xl bg-surface-2 px-4 py-2.5 text-[13px]">{msg}</div>}
 
       <Card>
-        <CardHeader title="Saved searches" sub="Create one from Discover with “Save search”" />
+        <CardHeader title="Saved searches" sub={`${REGION_LABEL[region]} searches. Create one from Discover with “Save search”`} />
         <div className="p-5">
           {saved.length === 0 ? (
-            <Empty icon={<Bookmark size={18} />} title="No saved searches" sub="Set up filters in Discover and save them to rerun or schedule." />
+            <Empty icon={<Bookmark size={18} />} title={`No ${REGION_LABEL[region]} saved searches`} sub="Set up filters in Discover and save them to rerun or schedule." />
           ) : (
             <div className="divide-y divide-line rounded-xl border border-line">
               {saved.map((s) => (
@@ -101,16 +111,16 @@ export default function SearchesPage() {
       </Card>
 
       <Card>
-        <CardHeader title="Search history" sub="Last 100 runs" />
+        <CardHeader title="Search history" sub={`${REGION_LABEL[region]} runs, last 100 overall`} />
         <div className="p-5">
-          {db.finder.history.length === 0 ? (
+          {history.length === 0 ? (
             <Empty icon={<History size={18} />} title="No searches yet" sub="Every search you run is logged here with what it found." />
           ) : (
             <div className="overflow-x-auto rounded-xl border border-line">
               <table className="w-full min-w-[640px] text-[13px]">
                 <thead><tr className="border-b border-line bg-surface-2/60 text-left text-[12px] text-muted"><th className="px-4 py-2 font-medium">Search</th><th className="px-3 py-2 font-medium">When</th><th className="px-3 py-2 text-right font-medium">Found</th><th className="px-3 py-2 text-right font-medium">New</th><th className="px-3 py-2 text-right font-medium">Duplicates</th><th className="px-3 py-2 text-right font-medium">Qualified</th></tr></thead>
                 <tbody className="divide-y divide-line">
-                  {db.finder.history.map((h) => (
+                  {history.map((h) => (
                     <tr key={h.id}>
                       <td className="max-w-[320px] px-4 py-2.5"><div className="truncate font-medium">{h.label}</div><div className="truncate text-[12px] text-muted">{describeQuery(h.query, db.services)}</div></td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-muted">{when(h.at)}</td>

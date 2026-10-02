@@ -100,6 +100,15 @@ export const isMarket = (v: unknown): v is MarketCode => typeof v === "string" &
 export const marketOf = (code?: string): Market | undefined => (isMarket(code) ? MARKETS[code] : undefined);
 export const isForeign = (code?: string) => isMarket(code) && code !== "IN";
 
+// ---------- India vs international ----------
+// Lead Finder keeps two separate workspaces. A lead belongs to one by its
+// country (leads from before countries existed are India).
+
+export type Region = "in" | "intl";
+export const REGION_LABEL: Record<Region, string> = { in: "India", intl: "International" };
+export const regionOf = (p: { country?: string }): Region => (isForeign(p.country) ? "intl" : "in");
+export const FOREIGN_GROUPS = MARKET_GROUPS.filter((g) => g.label !== "Home");
+
 // ---------- country names and cities typed by a person ----------
 
 const COUNTRY_ALIASES: [RegExp, MarketCode][] = [
@@ -245,4 +254,18 @@ export function localTime(tz: string, at: number): { label: string; vsIndia: str
   const h = Math.floor(Math.abs(diff) / 60), mins = Math.abs(diff) % 60;
   const amount = `${h}h${mins ? ` ${mins}m` : ""}`;
   return { label, vsIndia: diff === 0 ? "Same time as India" : `India is ${amount} ${diff > 0 ? "ahead" : "behind"}` };
+}
+
+// Which region a search is for: from its country, else from the places typed.
+// "unknown" = no place that is recognised (older searches then count as India);
+// "mixed" = places in both regions.
+export function queryRegion(q: { country?: string; locations: string[] }): Region | "unknown" | "mixed" {
+  if (isMarket(q.country)) return regionOf({ country: q.country });
+  const found = new Set<Region>();
+  for (const loc of q.locations) {
+    const m = resolveLocation(loc).market;
+    if (m) found.add(regionOf({ country: m.code }));
+  }
+  if (found.size === 0) return "unknown";
+  return found.size === 2 ? "mixed" : [...found][0];
 }

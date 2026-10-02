@@ -97,6 +97,12 @@ Keep it running with `pm2` or systemd. Back up the `data/` folder.
   - A site found this way is used only if it shows the listing's phone number. A site that clearly carries the business name and city but not the phone is used too, marked as an estimate. Anything else is listed under "Possible websites" for a person to check, never assumed.
   - The old listing link is kept on the lead and becomes a "Google listing links to wrong site" opportunity.
   - With only `GOOGLE_PLACES_API_KEY`, listed links are still checked, but no web search runs.
+- **India and International are separate workspaces.** A switch at the top right of every Lead Finder page (with a lead count for each) chooses which one you're in. Each has its own Discover page, lead database, saved searches, search history, auditor list and printed lead list.
+  - **India:** India only, in ₹, WhatsApp-first. There is no country picker.
+  - **International:** foreign countries only, with a country picker, local time, the lead's currency and email-first outreach.
+  - **Wrong workspace:** a search is checked against the workspace it's run from. Type "dentists in Austin" in India and it asks you to switch to International (your text is kept). Type an unknown place such as Lisbon in International and it asks for a country.
+  - **Where a lead lives:** by its country. Leads saved before countries existed count as India. Opening a lead switches the workspace to its region.
+  - **Shared by both:** the website auditor, Command Center, pipeline and Analytics cover all leads. "Run due searches" on the Saved searches page runs only the current workspace's searches. The scheduled daily run covers both.
 - **International leads.** Lead Finder also searches outside India: the United States, Canada, the United Kingdom, Australia, the UAE, Saudi Arabia, Qatar, Kuwait, Bahrain and Oman. Pick a country in the search form, or just type the place ("dentists in Austin, Texas", "interior designers in Dubai"). For a place that exists in several countries, pick the country or write "Birmingham, USA". With any of the three provider keys:
   - Searches use that country's Google results and the city's map position.
   - Duplicates are found even when a number is written two ways (`+971 4 123 4567` and `04 123 4567`).

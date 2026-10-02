@@ -244,7 +244,8 @@ export function prospectToLead(p: Prospect, d: DB, userName?: string): Lead {
 
 // ---------- CSV import / export ----------
 
-export function importCSV(text: string, d: DB): { prospects: Prospect[]; duplicates: number; skipped: number; missing: string[] } {
+// `defaultCountry` is used for rows that name no country and whose city isn't recognised.
+export function importCSV(text: string, d: DB, defaultCountry?: string): { prospects: Prospect[]; duplicates: number; skipped: number; missing: string[] } {
   const rows = parseCSV(text);
   if (rows.length < 2) return { prospects: [], duplicates: 0, skipped: 0, missing: [...IMPORT_COLUMNS] };
   const map = mapHeader(rows[0]);
@@ -265,7 +266,7 @@ export function importCSV(text: string, d: DB): { prospects: Prospect[]; duplica
     const locParts = loc.split(",").map((s) => s.trim()).filter(Boolean);
     const named = parseCountry(get(r, "Country")) ?? (locParts.length > 1 ? parseCountry(locParts[locParts.length - 1]) : undefined);
     const cityPart = (named && parseCountry(locParts[locParts.length - 1]) ? locParts.slice(0, -1) : locParts).pop();
-    const country = named ?? (cityPart ? resolveLocation(cityPart).market?.code : undefined);
+    const country = named ?? (cityPart ? resolveLocation(cityPart, defaultCountry).market?.code : undefined) ?? defaultCountry;
     const p = newProspect({
       name,
       industry: get(r, "Industry"),

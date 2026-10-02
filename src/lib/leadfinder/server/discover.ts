@@ -9,6 +9,7 @@ import { applyResolution, isDue, mergeInto, passesQuery } from "../prospect";
 import { activeProvider, ProviderError, type LeadProvider } from "./providers";
 import { analyzeWebsite } from "./analyzer";
 import { resolveWebsite } from "./resolve";
+import { queryRegion, type Region } from "../markets";
 
 // Server-side discovery, used by AUTO FIND (cron). The in-app FIND LEADS flow
 // runs the same steps from the browser so it can show live progress.
@@ -78,12 +79,14 @@ export async function runSavedSearch(db: DB, s: SavedSearch, deadline: number): 
 }
 
 // Loads the workspace, runs every due saved search, and saves with conflict retry.
-export async function runAutoFind(opts: { force?: string; budgetMs?: number } = {}) {
+export async function runAutoFind(opts: { force?: string; budgetMs?: number; region?: Region } = {}) {
   const deadline = Date.now() + (opts.budgetMs ?? 45_000);
   const loaded = await serverLoad();
   const db = migrate(loaded.data);
   if (!db) return { ran: 0, added: 0, message: "Workspace is empty." };
-  const due = db.finder.savedSearches.filter((s) => (opts.force ? s.id === opts.force : isDue(s)));
+  // "Run due" from the app can be limited to one region (older searches with no recognised place count as India).
+  const inScope = (s: SavedSearch) => { if (!opts.region) return true; const r = queryRegion(s.query); return r === "mixed" || (r === "unknown" ? "in" : r) === opts.region; };
+  const due = db.finder.savedSearches.filter((s) => (opts.force ? s.id === opts.force : isDue(s) && inScope(s)));
   if (!due.length) return { ran: 0, added: 0, message: "No saved searches are due." };
 
   const results: { id: string; added: Prospect[]; run: SearchRun }[] = [];

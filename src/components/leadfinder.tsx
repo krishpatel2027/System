@@ -9,7 +9,8 @@ import { opportunityLabel } from "@/lib/leadfinder/engine";
 import { STAGE_LABELS, type Progress, type Stage } from "@/lib/leadfinder/client";
 import { cn, inr } from "@/lib/utils";
 import { useDB } from "@/lib/store";
-import { MARKETS, isForeign, localTime, moneyFor, tzFor } from "@/lib/leadfinder/markets";
+import { MARKETS, REGION_LABEL, isForeign, localTime, moneyFor, regionOf, tzFor, type Region } from "@/lib/leadfinder/markets";
+import { setRegion, useRegion } from "@/lib/leadfinder/region";
 import { Badge, Card, Progress as Bar } from "@/components/ui";
 
 // "Navrangpura, Ahmedabad" or, for a lead abroad, "Austin, United States".
@@ -294,16 +295,38 @@ const TABS = [
   { href: "/lead-finder/audit", label: "Website auditor" },
   { href: "/lead-finder/searches", label: "Saved & auto find" },
 ];
+// India and International are two separate workspaces: their own searches,
+// leads, saved searches and reports. The switch shows how many leads each holds.
+export function RegionSwitch() {
+  const region = useRegion();
+  const { db } = useDB();
+  const counts = db.prospects.reduce<Record<Region, number>>((a, p) => { a[regionOf(p)]++; return a; }, { in: 0, intl: 0 });
+  return (
+    <div role="group" aria-label="Region" className="no-print inline-flex shrink-0 rounded-xl border border-line bg-surface-2 p-0.5">
+      {(["in", "intl"] as Region[]).map((r) => (
+        <button key={r} type="button" onClick={() => setRegion(r)} aria-pressed={region === r}
+          className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-[10px] px-3 py-1.5 text-[13px] font-medium transition", region === r ? "bg-surface text-ink shadow-sm ring-1 ring-line" : "text-muted hover:text-ink")}>
+          {r === "intl" && <Globe size={13} />}{REGION_LABEL[r]}
+          <span className={cn("rounded-md px-1.5 text-[11px] tabular-nums", region === r ? "bg-accent-soft text-accent" : "bg-surface text-subtle")}>{counts[r]}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function FinderTabs() {
   const path = usePathname();
   return (
-    <div className="no-print -mx-1 flex gap-1 overflow-x-auto px-1">
-      {TABS.map((t) => (
-        <Link key={t.href} href={t.href}
-          className={cn("whitespace-nowrap rounded-xl px-3 py-1.5 text-[13px] font-medium transition", path === t.href ? "bg-ink text-bg" : "text-muted hover:bg-surface-2 hover:text-ink")}>
-          {t.label}
-        </Link>
-      ))}
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="no-print -mx-1 flex gap-1 overflow-x-auto px-1">
+        {TABS.map((t) => (
+          <Link key={t.href} href={t.href}
+            className={cn("whitespace-nowrap rounded-xl px-3 py-1.5 text-[13px] font-medium transition", path === t.href ? "bg-ink text-bg" : "text-muted hover:bg-surface-2 hover:text-ink")}>
+            {t.label}
+          </Link>
+        ))}
+      </div>
+      <RegionSwitch />
     </div>
   );
 }

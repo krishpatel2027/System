@@ -8,7 +8,8 @@ import { SIGNALS, PART_LABELS } from "@/lib/leadfinder/catalog";
 import { miniAudit } from "@/lib/leadfinder/outreach";
 import { inr } from "@/lib/utils";
 import { SOURCE_LABEL } from "@/components/leadfinder";
-import { MARKETS, isForeign } from "@/lib/leadfinder/markets";
+import { MARKETS, REGION_LABEL, isForeign, regionOf } from "@/lib/leadfinder/markets";
+import { useRegion } from "@/lib/leadfinder/region";
 
 const fact = (p: Prospect, key: string, v?: string | number) =>
   v === undefined || v === "" ? "Not found" : `${v}${p.provenance[key] ? ` (${p.provenance[key].confidence}, ${SOURCE_LABEL[p.provenance[key].source]})` : ""}`;
@@ -86,11 +87,12 @@ function One({ p }: { p: Prospect }) {
 function Report() {
   const { db, ready } = useDB();
   const params = useSearchParams();
+  const region = useRegion();
   if (!ready) return null;
   const id = params.get("id");
   const ids = params.get("ids")?.split(",") ?? [];
   const single = id ? db.prospects.find((p) => p.id === id) : undefined;
-  const list = id ? [] : params.get("all") ? [...db.prospects].sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0)) : db.prospects.filter((p) => ids.includes(p.id));
+  const list = id ? [] : params.get("all") ? db.prospects.filter((p) => regionOf(p) === region).sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0)) : db.prospects.filter((p) => ids.includes(p.id));
 
   return (
     <div className="min-h-screen bg-white text-neutral-900">
@@ -101,7 +103,7 @@ function Report() {
       <main className="mx-auto max-w-4xl px-8 py-10">
         {single ? <One p={single} /> : list.length ? (
           <>
-            <h1 className="text-[24px] font-semibold tracking-tight">{db.settings.studio} · Lead list</h1>
+            <h1 className="text-[24px] font-semibold tracking-tight">{db.settings.studio} · {REGION_LABEL[region]} · Lead list</h1>
             <p className="mb-5 text-[12.5px] text-neutral-500">{list.length} businesses · {new Date().toLocaleDateString("en-IN", { dateStyle: "long" })} · potential pipeline value (not guaranteed revenue): {inr(list.reduce((a, p) => a + (p.match?.price ?? 0), 0))}</p>
             <table className="w-full border-collapse text-[11.5px]">
               <thead><tr className="border-b border-neutral-300 text-left text-neutral-500"><th className="py-1.5 pr-2 font-medium">Score</th><th className="py-1.5 pr-2 font-medium">Business</th><th className="py-1.5 pr-2 font-medium">Contact</th><th className="py-1.5 pr-2 font-medium">Website</th><th className="py-1.5 pr-2 font-medium">Recommended</th><th className="py-1.5 text-right font-medium">Value</th></tr></thead>
