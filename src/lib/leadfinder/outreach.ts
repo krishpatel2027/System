@@ -1,5 +1,5 @@
 import type { Prospect, Settings, Signal } from "../types";
-import { inr } from "../utils";
+import { dialDigits, isForeign, marketOf, moneyFor, type Fx } from "./markets";
 
 // Evidence-based outreach: observation → opportunity → solution → CTA. Every
 // sentence is built from something we actually detected; nothing is invented.
@@ -127,13 +127,29 @@ const solutionLine = (p: Prospect, studio: string) => {
 
 export interface Draft { subject?: string; body: string }
 
-export function outreach(p: Prospect, channel: Channel, s: Pick<Settings, "owner" | "studio" | "phone" | "website">): Draft {
+// The starting price in the lead's currency. Undefined when the lead is abroad
+// and no exchange rate is saved: a rupee amount would mean nothing to them.
+export function priceText(p: Prospect, fx?: Fx): string | undefined {
+  if (!p.match) return undefined;
+  const m = moneyFor(p.country, fx);
+  return m.needsRate ? undefined : m.fmt(p.match.price);
+}
+
+// Where a first message should go. WhatsApp is the norm in India and the Gulf;
+// elsewhere, email and calls are more usual.
+export const preferredChannel = (p: Prospect): Channel => (marketOf(p.country)?.whatsapp === false ? "email" : "whatsapp");
+
+export function outreach(p: Prospect, channel: Channel, s: Pick<Settings, "owner" | "studio" | "phone" | "website">, fx?: Fx): Draft {
   const a = angleFor(p);
   const greet = p.decisionMaker?.name ? `Hi ${p.decisionMaker.name.split(" ")[0]}` : "Hi";
   const me = s.owner || "the team";
   const studio = s.studio || "Arkria";
   const sign = [`— ${me}, ${studio}`, s.website].filter(Boolean).join("\n");
   const sol = solutionLine(p, studio);
+  const price = priceText(p, fx);
+  const via = marketOf(p.country)?.whatsapp === false ? "email" : "WhatsApp";
+  // Cold email abroad always gives an easy way out.
+  const optOut = isForeign(p.country) ? "\n\nIf this isn't relevant, just let me know and I won't follow up." : "";
 
   switch (channel) {
     case "whatsapp":
@@ -145,7 +161,7 @@ export function outreach(p: Prospect, channel: Channel, s: Pick<Settings, "owner
     case "email":
       return {
         subject: p.websiteStatus === "none" ? `A website for ${p.name}` : `A few ideas for ${p.name}'s website`,
-        body: `${greet},\n\n${a.observation}\n\n${a.opportunity}\n\n${sol}${p.match ? ` Projects like this typically start from ${inr(p.match.price)}.` : ""}\n\nWould you be open to a 15-minute call to see if it's a fit? I can share a quick audit beforehand, no obligation.\n\n${sign}`,
+        body: `${greet},\n\n${a.observation}\n\n${a.opportunity}\n\n${sol}${price ? ` Projects like this typically start from ${price}.` : ""}\n\nWould you be open to a 15-minute call to see if it's a fit? I can share a quick audit beforehand, no obligation.${optOut}\n\n${sign}`,
       };
     case "call":
       return {
@@ -155,7 +171,7 @@ export function outreach(p: Prospect, channel: Channel, s: Pick<Settings, "owner
           `OPPORTUNITY: "${a.opportunity}"`,
           `SOLUTION: "${sol}"`,
           `QUESTION: "How are most of your new customers finding you right now?"`,
-          `CTA: "Could I send you a short audit on WhatsApp and set up 15 minutes to walk through it?"`,
+          `CTA: "Could I send you a short audit by ${via === "email" ? "email" : "WhatsApp"} and set up 15 minutes to walk through it?"`,
           `IF BUSY: "No problem — what's the best time or number to reach you?"`,
         ].join("\n\n"),
       };
@@ -163,12 +179,12 @@ export function outreach(p: Prospect, channel: Channel, s: Pick<Settings, "owner
 }
 
 // A short, shareable audit a client can read in 30 seconds.
-export function miniAudit(p: Prospect): string {
+export function miniAudit(p: Prospect, fx?: Fx): string {
   const lines: string[] = [`Quick digital audit — ${p.name}`, ""];
   if (p.websiteStatus === "none") lines.push("• Website: none found on the business listing.");
   else if (p.audit?.ok) {
     const sc = p.audit.scores;
-    lines.push(`• Website: ${host(p.website)} (checked ${new Date(p.audit.analyzedAt).toLocaleDateString("en-IN")})`);
+    lines.push(`• Website: ${host(p.website)} (checked ${new Date(p.audit.analyzedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })})`);
     const NAMES = { mobile: "Mobile", seo: "SEO", performance: "Speed", conversion: "Enquiry flow" } as const;
     const bits = (["mobile", "seo", "performance", "conversion"] as const).filter((k) => sc[k] !== undefined).map((k) => `${NAMES[k]} ${sc[k]}/100`);
     if (bits.length) lines.push(`• Scores: ${bits.join(" · ")}`);
@@ -183,15 +199,14 @@ export function miniAudit(p: Prospect): string {
   } else if (p.websiteStatus === "none") {
     lines.push("", "Top opportunity:", "1. A simple, mobile-first website so people searching online can see your work and enquire directly.");
   }
-  if (p.match) lines.push("", `Recommended: ${p.match.serviceName} (from ${inr(p.match.price)})`);
+  const price = priceText(p, fx);
+  if (p.match) lines.push("", `Recommended: ${p.match.serviceName}${price ? ` (from ${price})` : ""}`);
   return lines.join("\n");
 }
 
 const rank = (s: "high" | "medium" | "low") => (s === "high" ? 0 : s === "medium" ? 1 : 2);
 
-export function waLink(phone: string | undefined, text: string) {
-  const d = (phone ?? "").replace(/\D/g, "");
-  if (!d) return undefined;
-  const num = d.length === 10 ? `91${d}` : d;
-  return `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
+export function waLink(phone: string | undefined, text: string, country?: string) {
+  const num = dialDigits(phone, country);
+  return num ? `https://wa.me/${num}?text=${encodeURIComponent(text)}` : undefined;
 }

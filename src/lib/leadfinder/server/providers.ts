@@ -1,12 +1,12 @@
 import type { Prospect } from "../../types";
 import { newProspect, industryFromTypes } from "../prospect";
-import { CITY_COORDS } from "../catalog";
+import { MARKETS, isMarket, marketOf, parseCountry, resolveLocation, type Market, type MarketCode } from "../markets";
 
 // Provider/connector layer. Each discovery source implements LeadProvider and
 // returns normalized prospects; the rest of the app never sees provider shapes.
 // Keys stay on the server (process.env) and are never sent to the browser.
 
-export interface ProviderSearch { text: string; industry: string; location: string; limit: number }
+export interface ProviderSearch { text: string; industry: string; location: string; country?: string; limit: number }
 export interface ProviderInfo { id: string; name: string; connected: boolean; note: string; envVar?: string }
 
 export interface LeadProvider {
@@ -34,7 +34,7 @@ interface Place {
   id: string;
   displayName?: { text: string };
   formattedAddress?: string;
-  addressComponents?: { longText: string; types: string[] }[];
+  addressComponents?: { longText: string; shortText?: string; types: string[] }[];
   nationalPhoneNumber?: string;
   internationalPhoneNumber?: string;
   websiteUri?: string;
@@ -84,12 +84,14 @@ async function placesFetch(path: string, init: RequestInit & { fieldMask: string
 // Google's own social links aren't in Places; only the website is. Business
 // details come straight from the listing the business manages, so they're
 // marked verified with Google as the source.
-function normalize(p: Place, industry: string, location: string): Prospect | null {
+function normalize(p: Place, industry: string, location: string, hint?: MarketCode): Prospect | null {
   if (!p.id || !p.displayName?.text) return null;
   if (p.businessStatus && p.businessStatus !== "OPERATIONAL") return null;
   const comp = (t: string) => p.addressComponents?.find((c) => c.types.includes(t))?.longText;
   const city = comp("locality") ?? comp("administrative_area_level_3") ?? comp("administrative_area_level_2") ?? (location || undefined);
   const area = comp("sublocality_level_1") ?? comp("sublocality") ?? comp("neighborhood");
+  const short = p.addressComponents?.find((c) => c.types.includes("country"))?.shortText?.toUpperCase();
+  const country = isMarket(short) ? short : hint ?? countryFromAddress(p.formattedAddress);
   const web = p.websiteUri;
   // A listing that points at Instagram/Facebook has a social page, not a website.
   const social = web && /instagram\.com|facebook\.com|linktr\.ee|wa\.me|whatsapp\.com/i.test(web) ? web : undefined;
@@ -100,6 +102,7 @@ function normalize(p: Place, industry: string, location: string): Prospect | nul
       category: p.primaryTypeDisplayName?.text,
       city,
       area,
+      country,
       address: p.formattedAddress,
       phone: p.internationalPhoneNumber ?? p.nationalPhoneNumber,
       website: social ? undefined : web,
@@ -123,10 +126,11 @@ export const googlePlaces: LeadProvider = {
   connected: () => !!placesKey(),
   async searchBusinesses(q) {
     const out: Prospect[] = [];
+    const market = searchMarket(q);
     let pageToken: string | undefined;
     // Text Search returns up to 20 per page and at most 60 per query.
     for (let page = 0; page < 3 && out.length < q.limit; page++) {
-      const body: Record<string, unknown> = { textQuery: q.text, pageSize: Math.min(20, q.limit - out.length), regionCode: "IN", languageCode: "en" };
+      const body: Record<string, unknown> = { textQuery: q.text, pageSize: Math.min(20, q.limit - out.length), regionCode: market.code, languageCode: "en" };
       if (pageToken) body.pageToken = pageToken;
       const data = (await placesFetch("/places:searchText", {
         method: "POST",
@@ -134,7 +138,7 @@ export const googlePlaces: LeadProvider = {
         fieldMask: [...FIELDS.map((f) => `places.${f}`), "nextPageToken"].join(","),
       })) as { places?: Place[]; nextPageToken?: string };
       for (const p of data.places ?? []) {
-        const n = normalize(p, q.industry, q.location);
+        const n = normalize(p, q.industry, q.location, market.code);
         if (n) out.push(n);
       }
       pageToken = data.nextPageToken;
@@ -148,6 +152,32 @@ export const googlePlaces: LeadProvider = {
     return normalize(p, "", "");
   },
 };
+
+// Which country a search is for. India stays the default, as before, unless a
+// country was chosen or the place is a known city abroad.
+function searchMarket(q: { location: string; country?: string }): Market {
+  return resolveLocation(q.location, q.country).market ?? marketOf(q.country) ?? MARKETS.IN;
+}
+
+// "…, Austin, TX 78701, USA" → "USA" → US. Also handles "Business Bay - Dubai - UAE".
+export function countryFromAddress(address?: string): MarketCode | undefined {
+  const parts = (address ?? "").split(/,|\s[-–]\s/).map((x) => x.trim()).filter(Boolean);
+  return parts.length ? parseCountry(parts[parts.length - 1]) : undefined;
+}
+
+const POSTCODE = /\b(?:[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}|[A-Z]\d[A-Z]\s*\d[A-Z]\d|[A-Z]{2,3}\s+\d{4,5}(?:-\d{4})?)\b/g;
+
+// Best-effort city from a formatted address outside India. Falls back to the
+// place that was searched for.
+function cityAbroad(address: string | undefined, fallback: string | undefined): string | undefined {
+  const parts = (address ?? "").split(/,|\s[-–]\s/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length && parseCountry(parts[parts.length - 1])) parts.pop();
+  for (let i = parts.length - 1; i >= 1; i--) {
+    const cleaned = parts[i].replace(POSTCODE, "").replace(/\b\d+\b/g, "").replace(/\s+/g, " ").trim();
+    if (cleaned && !/^(po box|p\.o\. box)/i.test(cleaned)) return cleaned;
+  }
+  return fallback?.split(",")[0].trim() || undefined;
+}
 
 // ---------- SerpApi (Google Maps results) ----------
 // Same Google Maps listings, fetched through SerpApi's google_maps engine.
@@ -199,7 +229,14 @@ function city(address?: string, fallback?: string) {
   return (i > 0 ? parts[i - 1] : undefined) ?? (fallback || undefined);
 }
 
-function normalizeSerp(p: SerpPlace, industry: string, location: string, source: "serpapi" | "searchapi" = "serpapi"): Prospect | null {
+function cityOf(address: string | undefined, location: string, market?: MarketCode) {
+  const fb = location.split(",")[0].trim();
+  // The searched place, when the address mentions it, is the most reliable answer.
+  if (fb && (address ?? "").toLowerCase().includes(fb.toLowerCase())) return fb;
+  return market && market !== "IN" ? cityAbroad(address, location) : city(address, location);
+}
+
+function normalizeSerp(p: SerpPlace, industry: string, location: string, source: "serpapi" | "searchapi" = "serpapi", hint?: MarketCode): Prospect | null {
   if (!p.title || !p.place_id) return null;
   if (p.open_state && /permanently closed|temporarily closed/i.test(p.open_state)) return null;
   const web = p.website;
@@ -209,7 +246,8 @@ function normalizeSerp(p: SerpPlace, industry: string, location: string, source:
       name: p.title,
       industry: industry || industryFromTypes((p.types ?? []).map((t) => t.toLowerCase().replace(/\s+/g, "_")), p.type ?? ""),
       category: p.type,
-      city: city(p.address, location),
+      city: cityOf(p.address, location, countryFromAddress(p.address) ?? hint),
+      country: countryFromAddress(p.address) ?? hint,
       address: p.address,
       phone: p.phone,
       website: social ? undefined : web,
@@ -236,16 +274,17 @@ export const serpApi: LeadProvider = {
   async searchBusinesses(q) {
     const out: Prospect[] = [];
     let url: URL | null = new URL("https://serpapi.com/search.json");
-    const params: Record<string, string> = { engine: "google_maps", type: "search", q: q.text, hl: "en", gl: "in", google_domain: "google.co.in" };
-    const at = CITY_COORDS[q.location.trim().toLowerCase()];
-    if (at) params.ll = `@${at[0]},${at[1]},12z`;
+    const found = resolveLocation(q.location, q.country);
+    const market = searchMarket(q);
+    const params: Record<string, string> = { engine: "google_maps", type: "search", q: q.text, hl: "en", gl: market.gl, google_domain: market.domain };
+    if (found.city) params.ll = `@${found.city.lat},${found.city.lng},12z`;
     url.search = new URLSearchParams(params).toString();
     // 20 results per page; each page is one SerpApi search credit.
     for (let page = 0; page < 3 && url && out.length < q.limit; page++) {
       const data = await serpFetch(url);
       const list = data.local_results ?? (data.place_results ? [data.place_results] : []);
       for (const p of list) {
-        const n = normalizeSerp(p, q.industry, q.location);
+        const n = normalizeSerp(p, q.industry, q.location, "serpapi", market.code);
         if (n) out.push(n);
       }
       const next = data.serpapi_pagination?.next && list.length ? new URL(data.serpapi_pagination.next) : null;
@@ -330,15 +369,16 @@ export const searchApi: LeadProvider = {
   connected: () => !!searchApiKey(),
   async searchBusinesses(q) {
     const out: Prospect[] = [];
-    const params: Record<string, string> = { engine: "google_maps", q: q.text, hl: "en", gl: "in" };
-    const at = CITY_COORDS[q.location.trim().toLowerCase()];
-    if (at) params.ll = `@${at[0]},${at[1]},12z`;
+    const found = resolveLocation(q.location, q.country);
+    const market = searchMarket(q);
+    const params: Record<string, string> = { engine: "google_maps", q: q.text, hl: "en", gl: market.gl };
+    if (found.city) params.ll = `@${found.city.lat},${found.city.lng},12z`;
     // Up to 20 results per page; each page is one SearchApi credit.
     for (let page = 1; page <= 3 && out.length < q.limit; page++) {
       const data = await searchApiFetch({ ...params, page: String(page) });
       const list = data.local_results ?? [];
       for (const p of list) {
-        const n = normalizeSerp(fromSearchApi(p), q.industry, q.location, "searchapi");
+        const n = normalizeSerp(fromSearchApi(p), q.industry, q.location, "searchapi", market.code);
         if (n) out.push(n);
       }
       if (list.length < 20) break;
@@ -363,7 +403,7 @@ export const activeProvider = () => PROVIDERS.find((p) => p.connected()) ?? null
 // and SerpApi offer it; Google Places has no web search.
 
 export interface WebResult { link: string; title?: string }
-export interface WebSearcher { id: "searchapi" | "serpapi"; name: string; search(q: string): Promise<WebResult[]> }
+export interface WebSearcher { id: "searchapi" | "serpapi"; name: string; search(q: string, country?: string): Promise<WebResult[]> }
 
 const organic = (list?: { link?: string; title?: string }[]): WebResult[] =>
   (list ?? []).filter((r): r is WebResult => typeof r.link === "string" && /^https?:\/\//i.test(r.link)).map((r) => ({ link: r.link, title: r.title }));
@@ -371,16 +411,17 @@ const organic = (list?: { link?: string; title?: string }[]): WebResult[] =>
 const searchApiWeb: WebSearcher = {
   id: "searchapi",
   name: "SearchApi.io",
-  async search(q) {
-    return organic((await searchApiFetch({ engine: "google", q, gl: "in", hl: "en", num: "10" })).organic_results);
+  async search(q, country) {
+    return organic((await searchApiFetch({ engine: "google", q, gl: (marketOf(country) ?? MARKETS.IN).gl, hl: "en", num: "10" })).organic_results);
   },
 };
 const serpApiWeb: WebSearcher = {
   id: "serpapi",
   name: "SerpApi",
-  async search(q) {
+  async search(q, country) {
+    const m = marketOf(country) ?? MARKETS.IN;
     const url = new URL("https://serpapi.com/search.json");
-    url.search = new URLSearchParams({ engine: "google", q, gl: "in", hl: "en", google_domain: "google.co.in", num: "10" }).toString();
+    url.search = new URLSearchParams({ engine: "google", q, gl: m.gl, hl: "en", google_domain: m.domain, num: "10" }).toString();
     return organic((await serpFetch(url)).organic_results);
   },
 };

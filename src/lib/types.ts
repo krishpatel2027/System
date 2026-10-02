@@ -398,6 +398,7 @@ export interface Prospect {
   category?: string;
   city?: string;
   area?: string;
+  country?: string;          // market code, e.g. "US", "AE"; empty means India (older leads)
   address?: string;
   phone?: string;
   whatsapp?: string;
@@ -441,6 +442,7 @@ export interface WebsiteCheck {
 }
 
 export interface SearchQuery {
+  country?: string;          // market code; locations like "Austin, USA" can also carry it
   text?: string;
   locations: string[];
   industries: string[];
@@ -486,6 +488,8 @@ export interface FinderState {
   scoring: ScoringConfig;
   savedSearches: SavedSearch[];
   history: SearchRun[];
+  // Rupees per 1 unit of a currency (e.g. USD: 83.5), typed in Settings. No defaults.
+  fx?: Record<string, number>;
 }
 
 export interface DB {

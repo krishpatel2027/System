@@ -7,6 +7,7 @@ import { withStage } from "../stages";
 import { DedupeIndex } from "./dedupe";
 import { evaluate } from "./engine";
 import { applyAudit, applyResolution, mergeInto, newProspect, passesQuery } from "./prospect";
+import { MARKETS, isForeign, parseCountry, resolveLocation } from "./markets";
 export { applyAudit, applyResolution };
 import { IMPORT_COLUMNS, mapHeader, parseCSV, toCSV } from "./csv";
 import type { ProviderInfo } from "./server/providers";
@@ -107,7 +108,7 @@ export function useDiscovery() {
       let searchesLeft = WEBSITE_SEARCHES_PER_RUN;
       let searchError: string | null = null;
       await pool(fresh, 4, async (p) => {
-        const ask = (allowSearch: boolean) => lfApi<ResolveResult>("resolve", { name: p.name, city: p.city, address: p.address, phone: p.phone, website: p.website, placeId: p.placeId, allowSearch });
+        const ask = (allowSearch: boolean) => lfApi<ResolveResult>("resolve", { name: p.name, city: p.city, address: p.address, phone: p.phone, website: p.website, placeId: p.placeId, country: p.country, allowSearch });
         try {
           let r: ResolveResult;
           try {
@@ -217,7 +218,7 @@ export function prospectToLead(p: Prospect, d: DB, userName?: string): Lead {
     industry: p.industry,
     website: p.website,
     instagram: p.socials.instagram,
-    location: [p.area, p.city].filter(Boolean).join(", ") || p.address,
+    location: [p.area, p.city, isForeign(p.country) ? MARKETS[p.country as keyof typeof MARKETS].name : undefined].filter(Boolean).join(", ") || p.address,
     contactName: p.decisionMaker?.name ?? "",
     role: p.decisionMaker?.role,
     phone: p.phone,
@@ -260,10 +261,16 @@ export function importCSV(text: string, d: DB): { prospects: Prospect[]; duplica
     const ig = get(r, "Instagram");
     const li = get(r, "LinkedIn");
     const loc = get(r, "Location");
+    // City is the last part of the location unless that part is a country name ("Austin, USA").
+    const locParts = loc.split(",").map((s) => s.trim()).filter(Boolean);
+    const named = parseCountry(get(r, "Country")) ?? (locParts.length > 1 ? parseCountry(locParts[locParts.length - 1]) : undefined);
+    const cityPart = (named && parseCountry(locParts[locParts.length - 1]) ? locParts.slice(0, -1) : locParts).pop();
+    const country = named ?? (cityPart ? resolveLocation(cityPart).market?.code : undefined);
     const p = newProspect({
       name,
       industry: get(r, "Industry"),
-      city: loc.split(",").map((s) => s.trim()).filter(Boolean).pop() || undefined,
+      city: cityPart || undefined,
+      country,
       address: loc || undefined,
       website: get(r, "Website") || undefined,
       phone: get(r, "Phone") || undefined,
@@ -290,9 +297,9 @@ export const importTemplate = () => toCSV([...IMPORT_COLUMNS], []);
 const conf = (p: Prospect, k: string) => p.provenance[k]?.confidence ?? "";
 
 export function prospectsCSV(list: Prospect[]) {
-  const header = ["Business Name", "Industry", "City", "Address", "Phone", "Phone confidence", "Email", "Email confidence", "WhatsApp", "Website", "Website status", "Instagram", "LinkedIn", "Google rating", "Google reviews", "Google Maps", "Opportunity score", "Recommended service", "Est. value (INR)", "Signals", "Status", "Sources", "Discovered"];
+  const header = ["Business Name", "Industry", "City", "Country", "Address", "Phone", "Phone confidence", "Email", "Email confidence", "WhatsApp", "Website", "Website status", "Instagram", "LinkedIn", "Google rating", "Google reviews", "Google Maps", "Opportunity score", "Recommended service", "Est. value (INR, your price)", "Signals", "Status", "Sources", "Discovered"];
   const rows = list.map((p) => [
-    p.name, p.industry, p.city, p.address, p.phone, conf(p, "phone"), p.email, conf(p, "email"), p.whatsapp, p.website, p.websiteStatus,
+    p.name, p.industry, p.city, p.country ? MARKETS[p.country as keyof typeof MARKETS]?.name ?? p.country : "India", p.address, p.phone, conf(p, "phone"), p.email, conf(p, "email"), p.whatsapp, p.website, p.websiteStatus,
     p.socials.instagram, p.socials.linkedin, p.rating, p.reviewCount, p.googleMapsUrl, p.score?.total, p.match?.serviceName, p.match?.price,
     Object.values(p.evidence).join(" | "), p.status, p.sources.join(", "), p.discoveredAt.slice(0, 10),
   ]);

@@ -65,6 +65,7 @@ export function migrate(raw: unknown): DB | null {
       scoring: { ...DEFAULT_SCORING, ...((doc.finder as Partial<DB["finder"]>)?.scoring ?? {}), weights: { ...DEFAULT_SCORING.weights, ...((doc.finder as Partial<DB["finder"]>)?.scoring?.weights ?? {}) } },
       savedSearches: (doc.finder as Partial<DB["finder"]>)?.savedSearches ?? [],
       history: (doc.finder as Partial<DB["finder"]>)?.history ?? [],
+      fx: (doc.finder as Partial<DB["finder"]>)?.fx ?? {},
     },
     meta: { schema: SCHEMA_VERSION },
   } as DB;

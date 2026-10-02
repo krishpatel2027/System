@@ -1,10 +1,11 @@
 import type { Confidence, Prospect, SavedSearch, SearchQuery, SourceId, WebsiteAudit } from "../types";
 import type { ResolveResult } from "./server/resolve";
+import { marketOf } from "./markets";
 import { uid } from "../utils";
 
 type Fields = Partial<Omit<Prospect, "id" | "sources" | "provenance" | "signals" | "evidence" | "status" | "discoveredAt" | "updatedAt" | "websiteStatus">>;
 
-const TRACKED: (keyof Fields)[] = ["name", "industry", "category", "city", "address", "phone", "whatsapp", "email", "website", "googleMapsUrl", "rating", "reviewCount", "description", "decisionMaker"];
+const TRACKED: (keyof Fields)[] = ["name", "industry", "category", "city", "country", "address", "phone", "whatsapp", "email", "website", "googleMapsUrl", "rating", "reviewCount", "description", "decisionMaker"];
 
 // Every field records where it came from. Provider data is "verified" (the
 // business published it there); things we inferred are marked "estimated".
@@ -38,7 +39,7 @@ export function mergeInto(base: Prospect, add: Prospect): Prospect {
     const nxt = add[k as keyof Prospect];
     if ((cur === undefined || cur === "") && nxt !== undefined && nxt !== "") (out as unknown as Record<string, unknown>)[k] = nxt;
   }
-  for (const k of ["placeId", "openingHours", "area"] as const) if (!out[k] && add[k]) (out as unknown as Record<string, unknown>)[k] = add[k];
+  for (const k of ["placeId", "openingHours", "area", "country"] as const) if (!out[k] && add[k]) (out as unknown as Record<string, unknown>)[k] = add[k];
   out.sources = [...new Set([...base.sources, ...add.sources])];
   if (out.website && base.websiteStatus === "none") out.websiteStatus = "unchecked";
   return out;
@@ -94,7 +95,7 @@ const WEB: Record<SearchQuery["website"], string> = { any: "", none: "No website
 export function describeQuery(q: SearchQuery, services: { id: string; name: string }[]) {
   return [
     q.industries.join(", "),
-    q.locations.length ? `in ${q.locations.join(", ")}` : "",
+    q.locations.length ? `in ${q.locations.join(", ")}${q.country && q.country !== "IN" ? ` (${marketOf(q.country)?.name ?? q.country})` : ""}` : q.country ? `in ${marketOf(q.country)?.name ?? q.country}` : "",
     WEB[q.website],
     q.serviceId ? services.find((s) => s.id === q.serviceId)?.name : "",
     q.minScore ? `score ≥ ${q.minScore}` : "",
@@ -137,6 +138,7 @@ export function applyResolution(p: Prospect, r: ResolveResult): Prospect {
     if (r.phone && !out.phone) { out.phone = r.phone; out.provenance.phone = { source: r.detailsSource, confidence: "verified" }; }
     if (r.address && !out.address) { out.address = r.address; out.provenance.address = { source: r.detailsSource, confidence: "verified" }; }
   }
+  if (r.country && !out.country) { out.country = r.country; out.provenance.country = { source: r.detailsSource ?? "website", confidence: "detected" }; }
   const manual = p.provenance.website?.source === "manual";
   if (!manual && (r.website ?? "") !== (p.website ?? "")) {
     out.website = r.website;

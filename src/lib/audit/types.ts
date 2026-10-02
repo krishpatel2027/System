@@ -243,6 +243,7 @@ export interface AuditRecord {
   crawlLimit: number;
   prospectId?: string;
   industryHint?: string;
+  country?: string;
   raw: AuditRaw;
   competitors: CompetitorRaw[];
   summary: AuditSummary;

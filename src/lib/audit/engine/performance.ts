@@ -47,7 +47,7 @@ export function performance(ctx: Ctx): ModuleOut {
         lcp: "Serve the main (hero) image or heading faster: compress and preload the hero image, cut render-blocking CSS/JS, and use a CDN.",
         inp: "Break up long JavaScript tasks, defer non-essential scripts and reduce third-party code so taps respond quickly.",
         cls: "Reserve space for images, embeds and banners (width/height or aspect-ratio) and avoid inserting content above existing content.",
-        ttfb: "Improve server response: enable full-page caching, upgrade hosting or add a CDN close to Indian visitors.",
+        ttfb: "Improve server response: enable full-page caching, upgrade hosting or add a CDN close to your visitors.",
       }[v.key as "lcp" | "inp" | "cls" | "ttfb"];
       f.push(F(`vitals.${v.key}`, poor ? "high" : "medium", "vitals", `${label} (${poor ? "poor" : "needs improvement"})`,
         `${label} — ${v.source}. Google's "good" threshold is ${v.key === "cls" ? "0.1" : ms(TH[v.key as "lcp"][0])}.`,

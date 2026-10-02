@@ -1,5 +1,6 @@
 import type { Prospect, ScoreBreakdown, ScoringConfig, Service, ServiceMatch, Signal, WebsiteAudit, WebsiteStatus } from "../types";
 import { SIGNALS, PART_LABELS } from "./catalog";
+import { marketOf } from "./markets";
 
 // Signals, scoring and service matching. Pure functions shared by the browser
 // and the server (auto-find), so a lead scores the same wherever it's evaluated.
@@ -65,7 +66,8 @@ export function deriveSignals(p: Prospect): { signals: Signal[]; evidence: Parti
       if ((a.scores.seo ?? 100) < 60) add("weak_seo", a.findings.filter((f) => f.category === "seo").slice(0, 2).map((f) => f.evidence).join(" ") || "Several SEO basics missing.");
       if (byId("no_https")) add("no_https", byId("no_https")!.evidence);
       if (!a.found.hasCta) add("no_cta", "No clear call-to-action (call, enquire, book, WhatsApp) found on the homepage.");
-      if (!a.found.whatsapp && !p.whatsapp) add("no_whatsapp", "No WhatsApp link found on the homepage.");
+      // Not a gap where customers don't usually use WhatsApp for business (US, Canada, UK, Australia).
+      if (!a.found.whatsapp && !p.whatsapp && marketOf(p.country)?.whatsapp !== false) add("no_whatsapp", "No WhatsApp link found on the homepage.");
       if (!a.found.hasForm) add("no_contact_form", "No enquiry or contact form found on the homepage.");
       if (a.found.sellsProducts) add("sells_products", "Product listings or prices found on the website.");
       if (a.found.sellsProducts && !a.found.hasCart) add("no_online_store", "Products are shown but no cart or checkout was detected.");

@@ -62,10 +62,10 @@ function scores(ctx: Ctx, fs: Finding[]): Record<ScoreKey, ScoreCell> {
 
 const uniqById = (fs: Finding[]) => { const m = new Map<string, Finding>(); for (const f of fs) if (!m.has(f.id)) m.set(f.id, f); return [...m.values()]; };
 
-export interface ComputeOpts { services: Service[]; industryHint?: string }
+export interface ComputeOpts { services: Service[]; industryHint?: string; country?: string }
 
 export function computeAudit(url: string, raw: AuditRaw, opts: ComputeOpts): AuditResult {
-  const ctx = buildCtx(raw, opts.industryHint);
+  const ctx = buildCtx(raw, opts.industryHint, opts.country);
   const mods = [performance(ctx), mobile(ctx), design(ctx), ux(ctx), seo(ctx), content(ctx), trust(ctx), accessibility(ctx), security(ctx), business(ctx)];
   const conv = conversion(ctx);
   const loc = localSeo(ctx);
@@ -234,7 +234,7 @@ export function compare(target: { raw: AuditRaw; result: AuditResult }, comps: {
 }
 
 export function computeRecord(rec: AuditRecord, services: Service[]) {
-  const result = computeAudit(rec.url, rec.raw, { services, industryHint: rec.industryHint });
+  const result = computeAudit(rec.url, rec.raw, { services, industryHint: rec.industryHint, country: rec.country });
   const comps = rec.competitors.map((c) => ({ url: c.url, raw: c.raw, result: computeAudit(c.url, c.raw, { services }) }));
   return { result, comps, comparison: comps.length ? compare({ raw: rec.raw, result }, comps) : [] };
 }

@@ -2,6 +2,7 @@ import type { Confidence, SourceId, WebsiteAudit, WebsiteCheck, WebsiteStatus } 
 import { guardedFetch, normalizeUrl, readCapped, robotsCheck } from "../../audit/server/net";
 import { classifyAudit } from "../engine";
 import { analyzeHtml, analyzeWebsite, visibleText } from "./analyzer";
+import { marketOf, nationalNumber } from "../markets";
 import { activeProvider, ProviderError, webSearcher, type LeadProvider } from "./providers";
 
 // Works out which website really belongs to a business.
@@ -20,6 +21,7 @@ export interface ResolveInput {
   phone?: string;
   website?: string;
   placeId?: string;
+  country?: string;
   allowSearch?: boolean;
 }
 
@@ -31,6 +33,7 @@ export interface ResolveResult {
   // Filled from the provider's place details when the listing search left them empty.
   phone?: string;
   address?: string;
+  country?: string;
   detailsSource?: LeadProvider["id"];
   check: WebsiteCheck;
 }
@@ -38,7 +41,7 @@ export interface ResolveResult {
 // Links that are not the business's own website.
 const NOT_OWN: [RegExp, string][] = [
   [/(^|\.)business\.site$/i, "a Google Business Profile website (Google shut these down in 2024)"],
-  [/(^|\.)(justdial|indiamart|sulekha|tradeindia|exportersindia|magicbricks|99acres|housing|nobroker|commonfloor|squareyards|makaan|zomato|swiggy|dineout|eazydiner|practo|lybrate|credihealth|urbancompany|urbanclap|yelp|tripadvisor|booking|makemytrip|goibibo|agoda|asklaila|grotal|yellowpages|clickindia|quikr|olx|amazon|flipkart|meesho|weddingwire|wedmegood|shaadisaga|zaubacorp|tofler|glassdoor|naukri|ambitionbox)\.(com|in|co\.in|net|org)$/i, "a directory or marketplace page"],
+  [/(^|\.)(justdial|indiamart|sulekha|tradeindia|exportersindia|magicbricks|99acres|housing|nobroker|commonfloor|squareyards|makaan|zomato|swiggy|dineout|eazydiner|practo|lybrate|credihealth|urbancompany|urbanclap|yelp|tripadvisor|booking|makemytrip|goibibo|agoda|asklaila|grotal|yellowpages|clickindia|quikr|olx|amazon|flipkart|meesho|weddingwire|wedmegood|shaadisaga|zaubacorp|tofler|glassdoor|naukri|ambitionbox|bbb|angi|angieslist|thumbtack|houzz|trustpilot|foursquare|manta|superpages|nextdoor|cylex|yell|192|checkatrade|trustatrader|hotfrog|truelocal|localsearch|whitepages|dnb|opencorporates|zillow|realtor|rightmove|zoopla|domain|realestate|bayut|propertyfinder|dubizzle|talabat|deliveroo|ubereats|doordash|grubhub|opentable|healthgrades|zocdoc|webmd|vitals|doctify|whatclinic|treatwell|fresha|booksy|mindbody|yellowpages-uae|dubaiyellowpages|expatwoman|ratedpeople|mybuilder|hipages|serviceseeking|oneflare|airtasker|crunchbase|zoominfo|rocketreach|signalhire|clutch|goodfirms|designrush)\.[a-z.]{2,}$/i, "a directory or marketplace page"],
   [/(^|\.)(facebook|instagram|linkedin|youtube|twitter|x|threads|pinterest|tiktok|fb)\.(com|me)$/i, "a social media page"],
   [/(^|\.)(linktr\.ee|wa\.me|whatsapp\.com|bit\.ly|tinyurl\.com|goo\.gl|g\.page|g\.co|maps\.app\.goo\.gl|bio\.link|beacons\.ai)$/i, "a link-in-bio, shortener or chat link"],
   [/(^|\.)(wikipedia\.org|wikimapia\.org|mapquest\.com|waze\.com)$/i, "a reference page"],
@@ -56,7 +59,7 @@ export function notOwnSite(url: string): string | null {
 }
 
 // Words that don't identify a business on their own.
-const GENERIC = new Set(("the and for with pvt private ltd limited llp co company corp corporation inc group india indian services service solutions solution " +
+const GENERIC = new Set(("the and for with pvt private ltd limited llp llc pllc pty plc fze fzco fzc dmcc wll co company corp corporation inc group india indian usa america british australian canadian services service solutions solution " +
   "enterprises enterprise agency agencies associates studio studios consultants consultancy consulting center centre shop store stores mart clinic clinics hospital " +
   "estate estates real realty realtors properties property developers developer builders builder construction constructions interiors interior design designs designer " +
   "designers architects architect architecture salon spa gym fitness cafe restaurant kitchen hotel hotels classes academy institute school education travels travel tours " +
@@ -66,11 +69,12 @@ export function nameTokens(name: string): string[] {
   return [...new Set(name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((t) => t.length >= 4 && !GENERIC.has(t) && !/^\d+$/.test(t)))];
 }
 
-const last10 = (s: string) => s.replace(/\D/g, "").slice(-10);
-function pagePhones(html: string, text: string): Set<string> {
+// Every phone number on the page, as the number without country code, so
+// "+971 4 123 4567" on the site matches "04 123 4567" on the listing.
+function pagePhones(html: string, text: string, country?: string): Set<string> {
   const out = new Set<string>();
-  for (const m of html.matchAll(/href\s*=\s*["']tel:([^"']+)["']/gi)) { const d = last10(decodeURIComponent(m[1])); if (d.length === 10) out.add(d); }
-  for (const m of text.matchAll(/\+?\d[\d\s().\/-]{8,18}\d/g)) { const d = last10(m[0]); if (d.length === 10) out.add(d); }
+  for (const m of html.matchAll(/href\s*=\s*["']tel:([^"']+)["']/gi)) { const d = nationalNumber(decodeURIComponent(m[1]), country); if (d) out.add(d); }
+  for (const m of text.matchAll(/\+?\(?\d[\d\s().\/-]{6,18}\d/g)) { const d = nationalNumber(m[0], country); if (d) out.add(d); }
   return out;
 }
 
@@ -92,21 +96,21 @@ async function fetchPage(u: URL): Promise<Page | null> {
 }
 
 // analyzeWebsite only throws for addresses it can't parse; treat those as unreachable.
-async function analyzeSafe(url: string): Promise<WebsiteAudit> {
-  try { return await analyzeWebsite(url); }
+async function analyzeSafe(url: string, country?: string): Promise<WebsiteAudit> {
+  try { return await analyzeWebsite(url, { country }); }
   catch (e) { return { url, analyzedAt: new Date().toISOString(), ok: false, error: (e as Error).message || "Invalid address.", scores: {}, findings: [], found: { phones: [], emails: [], socials: {}, hasViewport: false, hasForm: false, hasCta: false, hasChatWidget: false, hasCart: false, sellsProducts: false, internalLinks: 0 } }; }
 }
 
-const auditOf = (p: Page): WebsiteAudit => ({ url: p.url.toString(), analyzedAt: new Date().toISOString(), ...analyzeHtml(p.html, { url: p.url.toString(), finalUrl: p.url.toString(), status: p.status, responseMs: p.ms }) });
+const auditOf = (p: Page, country?: string): WebsiteAudit => ({ url: p.url.toString(), analyzedAt: new Date().toISOString(), ...analyzeHtml(p.html, { url: p.url.toString(), finalUrl: p.url.toString(), status: p.status, responseMs: p.ms, country }) });
 
 interface Match { kind: "phone" | "name"; detail: string }
 
-export function identify(page: { url: URL; html: string }, b: { name: string; city?: string; phones: string[] }): { match: Match | null; partial: boolean } {
+export function identify(page: { url: URL; html: string }, b: { name: string; city?: string; phones: string[]; country?: string }): { match: Match | null; partial: boolean } {
   const text = visibleText(page.html).toLowerCase();
   const title = (page.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").toLowerCase();
-  const want = b.phones.map(last10).filter((d) => d.length === 10);
+  const want = b.phones.map((p) => nationalNumber(p, b.country)).filter(Boolean);
   if (want.length) {
-    const found = pagePhones(page.html, text);
+    const found = pagePhones(page.html, text, b.country);
     const hit = want.find((d) => found.has(d));
     if (hit) return { match: { kind: "phone", detail: `it shows the same phone number as the Google listing (ending ${hit.slice(-4)})` }, partial: false };
   }
@@ -139,6 +143,7 @@ export async function resolveWebsite(input: ResolveInput): Promise<ResolveResult
   const out: ResolveResult = { check };
   let website = input.website?.trim() || undefined;
   let phone = input.phone;
+  let country = marketOf(input.country)?.code;
 
   // 1. Fill gaps from the full place details (list results can be incomplete).
   const provider = activeProvider();
@@ -147,6 +152,7 @@ export async function resolveWebsite(input: ResolveInput): Promise<ResolveResult
       const d = await provider.getBusinessDetails(input.placeId);
       if (d) {
         if (!phone && d.phone) out.phone = phone = d.phone;
+        if (!country && marketOf(d.country)) out.country = country = marketOf(d.country)!.code;
         if (!input.address && d.address) out.address = d.address;
         if (!website && d.website) { website = d.website; out.website = website; out.websiteSource = provider.id; out.websiteConfidence = "verified"; }
         if (out.phone || out.address || out.website) out.detailsSource = provider.id;
@@ -165,7 +171,7 @@ export async function resolveWebsite(input: ResolveInput): Promise<ResolveResult
       website = undefined;
       out.website = undefined;
     } else {
-      listingAudit = await analyzeSafe(website);
+      listingAudit = await analyzeSafe(website, country);
       listingStatus = classifyAudit(listingAudit);
       out.audit = listingAudit;
       // An old http:// or www/non-www address can serve a stale copy while the
@@ -177,7 +183,7 @@ export async function resolveWebsite(input: ResolveInput): Promise<ResolveResult
         const alt = u && (u.hostname.startsWith("www.") ? u.hostname.slice(4) : `www.${u.hostname}`);
         for (const v of isIp || !u ? [] : [`https://${u.host}/`, `https://${alt}${u.port ? `:${u.port}` : ""}/`]) {
           if (v === listingAudit.url || v === listingAudit.finalUrl) continue;
-          const a = await analyzeSafe(v);
+          const a = await analyzeSafe(v, country);
           const st = classifyAudit(a);
           if (RANK[st] > RANK[listingStatus] && st !== "unchecked") {
             check.listingWebsite = website;
@@ -198,9 +204,9 @@ export async function resolveWebsite(input: ResolveInput): Promise<ResolveResult
   const searcher = input.allowSearch === false ? null : webSearcher();
   if (needSearch && searcher) {
     check.searched = true;
-    const q = [input.name, input.city].filter(Boolean).join(" ");
+    const q = [input.name, input.city, country && country !== "IN" ? marketOf(country)?.name : undefined].filter(Boolean).join(" ");
     let results: { link: string; title?: string }[] = [];
-    try { results = await searcher.search(q); }
+    try { results = await searcher.search(q, country); }
     catch (e) { if (e instanceof ProviderError && (e.status === 400 || e.status === 429)) throw e; }
     const skip = new Set([website, check.listingWebsite].filter(Boolean).map((w) => bare(hostOf(w!))));
     const seen = new Set<string>();
@@ -217,13 +223,13 @@ export async function resolveWebsite(input: ResolveInput): Promise<ResolveResult
       try { u = normalizeUrl(c.link); } catch { return null; }
       const page = await fetchPage(u);
       if (!page) return null;
-      const id = identify(page, { name: input.name, city: input.city, phones });
+      const id = identify(page, { name: input.name, city: input.city, phones, country });
       if (!id.match) return id.partial ? { c, rank, partial: true as const } : null;
       // Use the site's homepage unless it lives under a path on a shared host.
       const shared = /^(sites\.google\.com|[\w-]+\.wixsite\.com|[\w-]+\.github\.io)$/i.test(page.url.hostname);
       let home = page;
       if (!shared && page.url.pathname !== "/") home = (await fetchPage(new URL("/", page.url))) ?? page;
-      const audit = auditOf(home);
+      const audit = auditOf(home, country);
       return { c, rank, partial: false as const, match: id.match, page: home, audit, status: classifyAudit(audit), shared };
     }));
 

@@ -7,7 +7,7 @@ import { useDB } from "@/lib/store";
 import type { Prospect, SearchQuery } from "@/lib/types";
 import { INDUSTRIES } from "@/lib/leadfinder/catalog";
 import { QueryFilters } from "@/components/leadfinder-forms";
-import { parseQuery } from "@/lib/leadfinder/nlp";
+import { convertBudget, parseQuery } from "@/lib/leadfinder/nlp";
 import { newProspect } from "@/lib/leadfinder/prospect";
 import { evaluate } from "@/lib/leadfinder/engine";
 import { downloadFile } from "@/lib/leadfinder/csv";
@@ -43,16 +43,31 @@ export default function LeadFinderPage() {
 
   const applyText = async (text: string, useAi: boolean) => {
     const rule = parseQuery(text);
-    let parsed = rule.query;
+    let parsed: Partial<SearchQuery> = rule.query;
     let chips = rule.understood;
+    let currency = rule.budgetCurrency;
     if (useAi && ai) {
       setParsing(true);
       try {
-        parsed = (await lfApi<{ query: Partial<SearchQuery> }>("ai", { task: "parse", text })).query;
+        const res = (await lfApi<{ query: Partial<SearchQuery> & { budgetCurrency?: string } }>("ai", { task: "parse", text })).query;
+        const { budgetCurrency, ...rest } = res;
+        parsed = rest; currency = budgetCurrency;
         chips = ["Understood with AI"];
       } catch {} finally { setParsing(false); }
     }
-    setQ((cur) => ({ ...cur, ...parsed, text, locations: parsed.locations?.length ? parsed.locations : cur.locations, industries: parsed.industries?.length ? parsed.industries : cur.industries }));
+    // A budget typed in dollars, pounds or dirhams is turned into rupees with the rate saved in Settings.
+    if (currency) {
+      const conv = convertBudget(parsed.budgetMax, currency, db.finder.fx);
+      parsed = { ...parsed, budgetMax: conv.budgetMax };
+      chips = [...chips.filter((c) => !c.startsWith("Budget")), ...(conv.chip ? [conv.chip] : [])];
+    }
+    setQ((cur) => ({
+      ...cur, ...parsed, text,
+      locations: parsed.locations?.length ? parsed.locations : cur.locations,
+      industries: parsed.industries?.length ? parsed.industries : cur.industries,
+      // New places replace the old country; otherwise keep what was picked.
+      country: parsed.locations?.length || parsed.country ? parsed.country : cur.country,
+    }));
     setUnderstood(chips);
   };
 
@@ -93,7 +108,7 @@ export default function LeadFinderPage() {
           <input value={q.text ?? ""} onChange={(e) => set({ text: e.target.value })}
             onKeyDown={(e) => { if (e.key === "Enter") void applyText(q.text ?? "", true); }}
             onBlur={() => q.text?.trim() && void applyText(q.text, false)}
-            placeholder="Try: interior designers in Ahmedabad and Surat without a website"
+            placeholder="Try: interior designers in Dubai and Abu Dhabi without a website"
             className={cn(inputCls, "h-12 rounded-2xl pl-10 pr-28 text-[15px]")} />
           <Btn size="sm" variant="ghost" className="absolute right-2 top-1/2 -translate-y-1/2" disabled={!q.text?.trim() || parsing} onClick={() => void applyText(q.text ?? "", true)}>
             {parsing ? "Reading…" : ai ? <><Sparkles size={13} /> Understand</> : "Apply"}
@@ -209,7 +224,7 @@ function ImportModal({ open, onClose, onDone }: { open: boolean; onClose: () => 
     <Modal open={open} onClose={onClose} wide title="Import businesses from CSV"
       footer={<><Btn variant="ghost" onClick={() => downloadFile("arkria-import-template.csv", importTemplate())}><Download size={13} /> Template</Btn><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn disabled={!preview?.prospects.length} onClick={confirm}>Import {preview?.prospects.length || ""}</Btn></>}>
       <div className="space-y-4 text-[13px]">
-        <p className="text-muted">Columns: <span className="text-ink">Business Name, Industry, Location, Website, Phone, Email, Instagram, LinkedIn, Notes</span>. Only Business Name is required. Imported data is labelled with its source; websites can be analyzed after import.</p>
+        <p className="text-muted">Columns: <span className="text-ink">Business Name, Industry, Location, Country, Website, Phone, Email, Instagram, LinkedIn, Notes</span>. Only Business Name is required. Country is optional (India is assumed unless the city or country says otherwise). Imported data is labelled with its source; websites can be analyzed after import.</p>
         <input type="file" accept=".csv,text/csv" onChange={(e) => void onFile(e.target.files?.[0])} className="block w-full text-[13px] file:mr-3 file:rounded-lg file:border-0 file:bg-surface-2 file:px-3 file:py-1.5 file:text-[13px] file:font-medium" />
         <textarea rows={6} className={cn(inputCls, "font-mono text-[12px]")} value={text} onChange={(e) => setText(e.target.value)} placeholder={"Business Name,Industry,Location,Website,Phone\nShree Interiors,Interior Design,Ahmedabad,shreeinteriors.in,+91 98…"} />
         {preview && (

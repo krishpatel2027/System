@@ -31,7 +31,7 @@ function AuditInner() {
   const start = async () => {
     if (!url.trim() || !caps) return;
     setDone(null);
-    const id = await audit.run({ url: url.trim(), crawlLimit: limit, competitors: compare ? comps.map((c) => c.trim()).filter(Boolean).slice(0, 3) : [], prospectId, industryHint: prospect?.industry || params.get("industry") || undefined }, caps);
+    const id = await audit.run({ url: url.trim(), crawlLimit: limit, competitors: compare ? comps.map((c) => c.trim()).filter(Boolean).slice(0, 3) : [], prospectId, industryHint: prospect?.industry || params.get("industry") || undefined, country: prospect?.country }, caps);
     if (id) { setDone(id); list.reload(); setTimeout(() => router.push(`/lead-finder/audits/${id}`), 1200); }
   };
 

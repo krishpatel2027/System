@@ -1,5 +1,6 @@
 import { parse, type HTMLElement } from "node-html-parser";
 import type { Finding, WebsiteAudit } from "../../types";
+import { marketOf, PHONE_TEXT } from "../markets";
 import { AnalyzeError, guardedFetch, normalizeUrl, readCapped as readBody, robotsCheck } from "../../audit/server/net";
 
 // Reads a business's public homepage and reports what's missing, with evidence.
@@ -16,8 +17,7 @@ const readCapped = async (res: Response) => (await readBody(res, 2_000_000)).tex
 const CTA_RE = /\b(contact|enquir|inquir|book|appointment|schedule|call now|call us|get (a )?quote|request|whatsapp|chat with|get started|free consultation|visit us|order now|shop now|buy now)\b/i;
 const CHAT_RE = /tawk\.to|crisp\.chat|intercom|zendesk|zopim|freshchat|wati\.io|interakt|tidio|drift\.com|hs-scripts|livechat|botpress|landbot|gallabox|aisensy|chatbase|voiceflow/i;
 const CART_RE = /add[\s-]to[\s-](cart|bag)|\/cart\b|checkout|woocommerce|cdn\.shopify|shopify\.com|razorpay|cashfree|instamojo|wix-ecommerce|bigcommerce|magento/i;
-const PRODUCT_RE = /(₹|rs\.?|inr)\s?\d[\d,]*|"@type"\s*:\s*"product"|\bshop\b|\bproducts?\b|\bcollections?\b|\bcatalog(ue)?\b/i;
-const PHONE_RE = /(?:\+91[\s-]?|\b0)?[6-9]\d{4}[\s-]?\d{5}\b/g;
+const PRODUCT_RE = /(₹|rs\.?|inr|\$|£|€|usd|gbp|eur|aed|cad|aud|sar|qar|kwd|bhd|omr)\s?\d[\d,]*|"@type"\s*:\s*"product"|\bshop\b|\bproducts?\b|\bcollections?\b|\bcatalog(ue)?\b/i;
 const EMAIL_RE = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi;
 
 const SOCIAL: [keyof WebsiteAudit["found"]["socials"], RegExp][] = [
@@ -41,7 +41,7 @@ export function visibleText(markup: string) {
 
 const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
 
-export function analyzeHtml(html: string, ctx: { url: string; finalUrl: string; status: number; responseMs: number }): Omit<WebsiteAudit, "analyzedAt" | "url"> {
+export function analyzeHtml(html: string, ctx: { url: string; finalUrl: string; status: number; responseMs: number; country?: string }): Omit<WebsiteAudit, "analyzedAt" | "url"> {
   const root = parse(html, { comment: false, blockTextElements: { script: true, style: true, noscript: false, pre: true } });
   const $ = (s: string) => root.querySelector(s);
   const $$ = (s: string) => root.querySelectorAll(s);
@@ -117,7 +117,7 @@ export function analyzeHtml(html: string, ctx: { url: string; finalUrl: string; 
 
   // --- contact & conversion ---
   const telLinks = links.filter((l) => /^tel:/i.test(l.href)).map((l) => decodeURIComponent(l.href.slice(4)).trim());
-  const textPhones = [...bodyText.matchAll(PHONE_RE)].map((m) => m[0].trim());
+  const textPhones = [...bodyText.matchAll(PHONE_TEXT)].map((m) => m[0].trim());
   const phones = [...new Set([...telLinks, ...textPhones].map((p) => p.replace(/[^\d+]/g, "")).filter((p) => p.replace(/\D/g, "").length >= 10))].slice(0, 3);
   const mailLinks = links.filter((l) => /^mailto:/i.test(l.href)).map((l) => decodeURIComponent(l.href.slice(7).split("?")[0]).trim().toLowerCase());
   const textEmails = [...bodyText.matchAll(EMAIL_RE)].map((m) => m[0].toLowerCase());
@@ -134,12 +134,15 @@ export function analyzeHtml(html: string, ctx: { url: string; finalUrl: string; 
   const hasCta = CTA_RE.test(buttonsText) || telLinks.length > 0 || !!waLink;
   const hasChatWidget = CHAT_RE.test(scriptSrcs.join(" ") + inlineJs.slice(0, 200_000));
   const hasCart = CART_RE.test(html.slice(0, 1_500_000));
-  const sellsProducts = hasCart || PRODUCT_RE.test(bodyText.slice(0, 200_000)) && /(₹|rs\.?|inr)\s?\d/i.test(bodyText);
+  const sellsProducts = hasCart || PRODUCT_RE.test(bodyText.slice(0, 200_000)) && /(₹|rs\.?|inr|\$|£|€|usd|gbp|eur|aed|cad|aud|sar|qar|kwd|bhd|omr)\s?\d/i.test(bodyText);
 
   let conversion = 100;
   if (!hasCta) { conversion -= 35; add({ id: "no_cta", category: "conversion", severity: "high", issue: "No clear call to action", evidence: "No call, WhatsApp, book or enquire button was found on the homepage.", improvement: "Add a prominent enquiry button above the fold and repeat it down the page." }); }
   if (!hasForm) { conversion -= 20; add({ id: "no_form", category: "conversion", severity: "medium", issue: "No enquiry form", evidence: "No contact or enquiry form on the homepage.", improvement: "Add a short 3-field enquiry form that sends leads to email and WhatsApp." }); }
-  if (!waLink) { conversion -= 15; add({ id: "no_whatsapp", category: "conversion", severity: "medium", issue: "No WhatsApp button", evidence: "No WhatsApp chat link was found.", improvement: "Add a click-to-WhatsApp button — most Indian customers prefer it." }); }
+  // WhatsApp is how customers usually reach a business in India and the Gulf; in
+  // North America, the UK and Australia a missing button isn't a real gap.
+  const waMatters = !ctx.country || marketOf(ctx.country)?.whatsapp !== false;
+  if (!waLink && waMatters) { conversion -= 15; add({ id: "no_whatsapp", category: "conversion", severity: "medium", issue: "No WhatsApp button", evidence: "No WhatsApp chat link was found.", improvement: "Add a click-to-WhatsApp button — many customers here prefer it to forms or calls." }); }
   if (!phones.length && !telLinks.length) { conversion -= 10; add({ id: "no_phone", category: "conversion", severity: "low", issue: "Phone number hard to find", evidence: "No phone number or tap-to-call link on the homepage.", improvement: "Show a tap-to-call number in the header." }); }
 
   // --- accessibility ---
@@ -165,7 +168,7 @@ export function analyzeHtml(html: string, ctx: { url: string; finalUrl: string; 
 
 const emptyFound: WebsiteAudit["found"] = { phones: [], emails: [], socials: {}, hasViewport: false, hasForm: false, hasCta: false, hasChatWidget: false, hasCart: false, sellsProducts: false, internalLinks: 0 };
 
-export async function analyzeWebsite(input: string): Promise<WebsiteAudit> {
+export async function analyzeWebsite(input: string, opts: { country?: string } = {}): Promise<WebsiteAudit> {
   const u = normalizeUrl(input);
   const base = { url: u.toString(), analyzedAt: new Date().toISOString(), scores: {}, findings: [], found: emptyFound };
   try {
@@ -186,7 +189,7 @@ export async function analyzeWebsite(input: string): Promise<WebsiteAudit> {
     const html = await readCapped(res);
     const responseMs = Date.now() - t0;
     if (!html.trim()) return { ...base, ok: false, httpStatus: res.status, error: "The page was empty." };
-    return { ...base, ...analyzeHtml(html, { url: u.toString(), finalUrl: url.toString(), status: res.status, responseMs }) };
+    return { ...base, ...analyzeHtml(html, { url: u.toString(), finalUrl: url.toString(), status: res.status, responseMs, country: opts.country }) };
   } catch (e) {
     if (e instanceof AnalyzeError) return { ...base, ok: false, error: e.message };
     const err = e as Error & { cause?: { code?: string } };

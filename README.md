@@ -97,6 +97,13 @@ Keep it running with `pm2` or systemd. Back up the `data/` folder.
   - A site found this way is used only if it shows the listing's phone number. A site that clearly carries the business name and city but not the phone is used too, marked as an estimate. Anything else is listed under "Possible websites" for a person to check, never assumed.
   - The old listing link is kept on the lead and becomes a "Google listing links to wrong site" opportunity.
   - With only `GOOGLE_PLACES_API_KEY`, listed links are still checked, but no web search runs.
+- **International leads.** Lead Finder also searches outside India: the United States, Canada, the United Kingdom, Australia, the UAE, Saudi Arabia, Qatar, Kuwait, Bahrain and Oman. Pick a country in the search form, or just type the place ("dentists in Austin, Texas", "interior designers in Dubai"). For a place that exists in several countries, pick the country or write "Birmingham, USA". With any of the three provider keys:
+  - Searches use that country's Google results and the city's map position.
+  - Duplicates are found even when a number is written two ways (`+971 4 123 4567` and `04 123 4567`).
+  - Each lead shows its country, the local time there and how it compares to India.
+  - Lead values show in the lead's own currency. **Settings → International markets** is where you type the rates, for example 1 USD = ₹83.5. No rates are built in. Until you add one, foreign leads stay in ₹ and outreach drafts leave the price out rather than quote rupees to a customer abroad. A budget typed as "under $5k" is converted with the same rate.
+  - WhatsApp is only flagged as a gap in markets where customers use it for business (India and the Gulf). Outreach defaults to email in the US, Canada, the UK and Australia, with a short note about local rules on unsolicited email. It is not legal advice, so check the rules before contacting anyone. Cold emails abroad end with an opt-out line.
+  - CSV import and export have a Country column.
 - `GOOGLE_PAGESPEED_API_KEY` is optional.
 - `ANTHROPIC_API_KEY` is optional. It uses `claude-opus-5-5` with server-side fallbacks enabled (`fallbacks: "default"`), so a request can be served by a fallback model if the primary is unavailable.
 - `CRON_SECRET` enables **Auto find**. On Vercel, `vercel.json` runs `/api/lead-finder/auto` daily at 09:00 IST. It runs daily/weekly saved searches that are due and adds only new, de-duplicated businesses. The Vercel Hobby plan allows one cron per day. On your own server, call that URL from cron with `Authorization: Bearer $CRON_SECRET`.

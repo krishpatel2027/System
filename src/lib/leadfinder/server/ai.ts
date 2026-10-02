@@ -50,23 +50,26 @@ const QuerySchema = z.object({
   locations: z.array(z.string()).describe("Cities, areas or regions mentioned. Empty if none."),
   website: z.enum(["any", "none", "weak", "none_or_weak", "has"]).describe("none = no website; weak = outdated/poor/slow website; none_or_weak = either; has = must have a site; any = not specified."),
   serviceId: z.enum(["", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"]).describe("s1 business website, s2 landing page, s3 premium interactive site, s4 e-commerce, s5 SaaS/dashboard, s6 mobile app, s7 AI chatbot, s8 SEO/performance. Empty if not implied."),
-  budgetMax: z.number().describe("Max project budget in INR, 0 if not stated."),
+  country: z.enum(["", "IN", "US", "CA", "GB", "AU", "AE", "SA", "QA", "KW", "BH", "OM"]).describe("Country the request is about: IN India, US United States, CA Canada, GB United Kingdom, AU Australia, AE UAE, SA Saudi Arabia, QA Qatar, KW Kuwait, BH Bahrain, OM Oman. Empty if not stated or if the places are in several countries."),
+  budgetMax: z.number().describe("Max project budget as a plain number in the currency given by budgetCurrency, 0 if not stated."),
+  budgetCurrency: z.enum(["INR", "USD", "CAD", "GBP", "AUD", "AED", "SAR", "QAR", "KWD", "BHD", "OMR"]).describe("Currency the budget was stated in. INR when no currency is mentioned."),
   minRating: z.number().describe("Minimum Google rating 0-5, 0 if not stated."),
   minReviews: z.number().describe("Minimum number of reviews, 0 if not stated."),
   minScore: z.number().describe("Minimum opportunity score 0-100. 70 if the user asks for high/best opportunities, else 0."),
   requireContact: z.boolean().describe("True if the user wants only businesses with a phone or email."),
 });
 
-export async function aiParseQuery(text: string): Promise<Partial<SearchQuery>> {
+export async function aiParseQuery(text: string): Promise<Partial<SearchQuery> & { budgetCurrency?: string }> {
   const r = await run(
     QuerySchema,
-    "You convert a sales prospecting request from an Indian web design studio into search filters. Only extract what the request states or clearly implies; leave everything else at its empty value.",
+    "You convert a sales prospecting request from a web design studio (based in India, selling to businesses in India, North America, the UK, Australia and the Gulf) into search filters. Only extract what the request states or clearly implies; leave everything else at its empty value.",
     text.slice(0, 1000),
     1024,
   );
-  const out: Partial<SearchQuery> = { industries: r.industries.slice(0, 6), locations: r.locations.slice(0, 8), website: r.website };
+  const out: Partial<SearchQuery> & { budgetCurrency?: string } = { industries: r.industries.slice(0, 6), locations: r.locations.slice(0, 8), website: r.website };
+  if (r.country) out.country = r.country;
   if (r.serviceId) out.serviceId = r.serviceId;
-  if (r.budgetMax > 0) out.budgetMax = r.budgetMax;
+  if (r.budgetMax > 0) { out.budgetMax = r.budgetMax; if (r.budgetCurrency !== "INR") out.budgetCurrency = r.budgetCurrency; }
   if (r.minRating > 0) out.minRating = Math.min(5, r.minRating);
   if (r.minReviews > 0) out.minReviews = r.minReviews;
   if (r.minScore > 0) out.minScore = Math.min(100, r.minScore);
@@ -90,7 +93,7 @@ const CHANNEL_RULES: Record<string, string> = {
 };
 
 // Only verified/detected facts are passed in, and the model is told not to add any.
-function facts(p: Prospect) {
+function facts(p: Prospect, price?: string) {
   return {
     business: p.name,
     industry: p.industry,
@@ -104,22 +107,25 @@ function facts(p: Prospect) {
     auditIssues: p.audit?.findings.slice(0, 5).map((f) => `${f.issue}: ${f.evidence}`),
     pagespeedMobile: p.audit?.pagespeed?.performance,
     recommendedService: p.match?.serviceName,
-    startingPriceINR: p.match?.price,
+    country: p.country,
+    startingPrice: price,
   };
 }
 
-export async function aiOutreach(p: Prospect, channel: string, sender: { owner: string; studio: string; website?: string }) {
+export async function aiOutreach(p: Prospect, channel: string, sender: { owner: string; studio: string; website?: string }, price?: string) {
   const rules = CHANNEL_RULES[channel] ?? CHANNEL_RULES.whatsapp;
   return run(
     DraftSchema,
     [
-      `You write first-contact outreach for ${sender.studio}, a web design and development studio in India. The sender is ${sender.owner}.`,
+      `You write first-contact outreach for ${sender.studio}, a web design and development studio based in India that works with clients worldwide. The sender is ${sender.owner}.`,
       "Structure: a specific observation about the business → the opportunity it creates → how the studio would solve it → one low-pressure call to action.",
       "Use ONLY the facts provided. Never invent numbers, names, reviews, competitors, results or claims. If a fact is missing, leave it out.",
+      "Quote a price only if startingPrice is given, exactly as written; otherwise do not mention money. Write in the spelling and tone usual in the business's country (country is a code: US, CA, GB, AU, AE, SA, QA, KW, BH, OM or IN).",
+      "For email to a business outside India, finish with one line letting them opt out of further contact. Never claim a prior relationship or consent.",
       "No flattery, no hype words, no emojis, no guarantees. Sound like a thoughtful local professional. This is a draft a human will review before sending.",
       rules,
     ].join("\n"),
-    `Facts (JSON):\n${JSON.stringify(facts(p))}\n\nSender website: ${sender.website || "none"}\nChannel: ${channel}`,
+    `Facts (JSON):\n${JSON.stringify(facts(p, price))}\n\nSender website: ${sender.website || "none"}\nChannel: ${channel}`,
     2048,
   );
 }

@@ -30,7 +30,7 @@ function ReportView({ rec }: { rec: NonNullable<ReturnType<typeof useAuditRecord
   const actions = useProspectActions();
   const { ai } = useFinderStatus();
   const { result: r, comparison } = useMemo(() => computeRecord(rec, db.services), [rec, db.services]);
-  const intel = useMemo(() => salesIntel(buildCtx(rec.raw, rec.industryHint), r, db.settings.studio || "Arkria"), [rec, r, db.settings.studio]);
+  const intel = useMemo(() => salesIntel(buildCtx(rec.raw, rec.industryHint, rec.country), r, db.settings.studio || "Arkria"), [rec, r, db.settings.studio]);
   const [pitchOpen, setPitchOpen] = useState(false);
   const [added, setAdded] = useState<string | null>(null);
   const big = biggestOpportunity(r);

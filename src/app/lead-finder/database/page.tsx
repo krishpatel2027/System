@@ -11,6 +11,7 @@ import { STAGES } from "@/lib/stages";
 import { cn, inr } from "@/lib/utils";
 import { Badge, Btn, Empty, inputCls, PageHeader, Progress, Tabs } from "@/components/ui";
 import { FinderTabs, ProspectCard, ScoreRing, WebsiteBadge, prospectStatus } from "@/components/leadfinder";
+import { MARKETS, isForeign, marketOf } from "@/lib/leadfinder/markets";
 
 type Sort = "score" | "newest" | "reviews" | "value" | "name";
 
@@ -22,6 +23,7 @@ function DatabaseInner() {
   const [text, setText] = useState("");
   const [industry, setIndustry] = useState("");
   const [city, setCity] = useState("");
+  const [country, setCountry] = useState("");
   const [site, setSite] = useState<"" | WebsiteStatus | "weak">("");
   const [status, setStatus] = useState<"" | Prospect["status"] | "pipeline">("");
   const [service, setService] = useState("");
@@ -33,15 +35,17 @@ function DatabaseInner() {
   const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
 
   const industries = useMemo(() => [...new Set(db.prospects.map((p) => p.industry).filter(Boolean))].sort(), [db.prospects]);
+  const countries = useMemo(() => [...new Set(db.prospects.map((p) => p.country ?? "IN"))].sort(), [db.prospects]);
   const cities = useMemo(() => [...new Set(db.prospects.map((p) => p.city).filter((c): c is string => !!c))].sort(), [db.prospects]);
   const leadOf = useMemo(() => new Map(db.leads.filter((l) => l.prospectId).map((l) => [l.prospectId!, l])), [db.leads]);
 
   const list = useMemo(() => {
     const t = text.trim().toLowerCase();
     const out = db.prospects.filter((p) => {
-      if (t && !`${p.name} ${p.industry} ${p.city} ${p.area} ${p.website} ${p.category}`.toLowerCase().includes(t)) return false;
+      if (t && !`${p.name} ${p.industry} ${p.city} ${p.area} ${p.country ?? ""} ${marketOf(p.country)?.name ?? ""} ${p.website} ${p.category}`.toLowerCase().includes(t)) return false;
       if (industry && p.industry !== industry) return false;
       if (city && p.city !== city) return false;
+      if (country && (p.country ?? "IN") !== country) return false;
       if (site === "weak" ? !["outdated", "basic", "unreachable"].includes(p.websiteStatus) : site && p.websiteStatus !== site) return false;
       if (status === "pipeline" ? !leadOf.has(p.id) : status && p.status !== status) return false;
       if (service && p.match?.serviceId !== service) return false;
@@ -57,7 +61,7 @@ function DatabaseInner() {
       name: (a, b) => a.name.localeCompare(b.name),
     };
     return out.sort(by[sort]);
-  }, [db.prospects, text, industry, city, site, status, service, minScore, contact, sort, leadOf]);
+  }, [db.prospects, text, industry, city, country, site, status, service, minScore, contact, sort, leadOf]);
 
   const chosen = list.filter((p) => selected.includes(p.id));
   const target = chosen.length ? chosen : list;
@@ -76,7 +80,7 @@ function DatabaseInner() {
   };
 
   const unchecked = target.filter((p) => p.website && !p.audit).length;
-  const reset = () => { setText(""); setIndustry(""); setCity(""); setSite(""); setStatus(""); setService(""); setMinScore(0); setContact(false); };
+  const reset = () => { setText(""); setIndustry(""); setCity(""); setCountry(""); setSite(""); setStatus(""); setService(""); setMinScore(0); setContact(false); };
 
   return (
     <div className="space-y-6">
@@ -90,6 +94,7 @@ function DatabaseInner() {
             <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, area, website…" className={cn(inputCls, "pl-8")} />
           </div>
           <select className={cn(inputCls, "w-auto")} value={industry} onChange={(e) => setIndustry(e.target.value)} aria-label="Industry"><option value="">All industries</option>{industries.map((i) => <option key={i}>{i}</option>)}</select>
+          {countries.length > 1 && <select className={cn(inputCls, "w-auto")} value={country} onChange={(e) => setCountry(e.target.value)} aria-label="Country"><option value="">All countries</option>{countries.map((c) => <option key={c} value={c}>{MARKETS[c as keyof typeof MARKETS]?.name ?? c}</option>)}</select>}
           <select className={cn(inputCls, "w-auto")} value={city} onChange={(e) => setCity(e.target.value)} aria-label="City"><option value="">All cities</option>{cities.map((c) => <option key={c}>{c}</option>)}</select>
           <select className={cn(inputCls, "w-auto")} value={site} onChange={(e) => setSite(e.target.value as typeof site)} aria-label="Website">
             <option value="">Any website</option><option value="none">No website</option><option value="weak">Weak / outdated</option><option value="outdated">Outdated</option><option value="basic">Basic</option><option value="good">Strong</option><option value="unchecked">Not checked</option><option value="unreachable">Not loading</option>
@@ -154,7 +159,7 @@ function DatabaseInner() {
                       <td className="px-2 py-2.5"><ScoreRing score={p.score?.total} cfg={cfg} size={36} /></td>
                       <td className="max-w-[260px] px-3 py-2.5">
                         <Link href={`/lead-finder/${p.id}`} className="block truncate font-medium hover:text-accent">{p.name}</Link>
-                        <div className="truncate text-[12px] text-muted">{[p.industry, p.area ?? p.city].filter(Boolean).join(" · ") || "—"}</div>
+                        <div className="truncate text-[12px] text-muted">{[p.industry, p.area ?? p.city, isForeign(p.country) ? MARKETS[p.country as keyof typeof MARKETS].name : undefined].filter(Boolean).join(" · ") || "—"}</div>
                       </td>
                       <td className="px-3 py-2.5"><WebsiteBadge status={p.websiteStatus} /></td>
                       <td className="px-3 py-2.5 text-[12.5px] tabular-nums text-muted">{p.rating !== undefined ? `${p.rating.toFixed(1)}★ · ${p.reviewCount ?? 0}` : "—"}</td>

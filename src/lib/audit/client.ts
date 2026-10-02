@@ -63,7 +63,7 @@ export function useAuditCapabilities() {
 export type Stages = Record<StageId, StageState>;
 const initialStages = (): Stages => Object.fromEntries(STAGES.map((s) => [s.id, { status: "pending" }])) as Stages;
 
-export interface DeepAuditInput { url: string; crawlLimit: number; competitors: string[]; prospectId?: string; industryHint?: string }
+export interface DeepAuditInput { url: string; crawlLimit: number; competitors: string[]; prospectId?: string; industryHint?: string; country?: string }
 
 export function useDeepAudit() {
   const { db, getDB, mutate, userName } = useDB();
@@ -87,7 +87,7 @@ export function useDeepAudit() {
     try {
       let lastCompute = 0;
       let trailing: ReturnType<typeof setTimeout> | null = null;
-      const recompute = (r: AuditRaw) => { lastCompute = Date.now(); try { setPartial(computeAudit(input.url, r, { services: servicesRef.current, industryHint: input.industryHint })); } catch {} };
+      const recompute = (r: AuditRaw) => { lastCompute = Date.now(); try { setPartial(computeAudit(input.url, r, { services: servicesRef.current, industryHint: input.industryHint, country: input.country })); } catch {} };
       const raw = await runAudit(transport, {
         url: input.url,
         crawlLimit: input.crawlLimit,
@@ -120,7 +120,7 @@ export function useDeepAudit() {
       }
 
       setStages((cur) => ({ ...cur, opportunity: { status: "running", detail: "Scoring and matching services" } }));
-      const result = computeAudit(input.url, raw, { services: getDB().services, industryHint: input.industryHint });
+      const result = computeAudit(input.url, raw, { services: getDB().services, industryHint: input.industryHint, country: input.country });
       setPartial(result);
       const host = new URL(raw.site.origin).hostname.replace(/^www\./, "");
       const rec: AuditRecord = trimForStorage({
@@ -132,6 +132,7 @@ export function useDeepAudit() {
         crawlLimit: input.crawlLimit,
         prospectId: input.prospectId,
         industryHint: input.industryHint,
+        country: input.country,
         raw,
         competitors,
         summary: summarize(result),
@@ -231,7 +232,7 @@ export function proposalFromAudit(rec: AuditRecord, result: AuditResult, d: DB):
     id: uid("pr"),
     clientName: name,
     title: `${name} — ${svc?.name ?? "Website"} proposal`,
-    understanding: `${name} (${rec.domain}) is a ${result.business.label.toLowerCase()} business. We audited ${result.pagesAnalyzed.length} pages of the current website on ${new Date(rec.createdAt).toLocaleDateString("en-IN")}. Overall website health: ${result.overallScore ?? "not scored"}/100.`,
+    understanding: `${name} (${rec.domain}) is a ${result.business.label.toLowerCase()} business. We audited ${result.pagesAnalyzed.length} pages of the current website on ${new Date(rec.createdAt).toLocaleDateString("en-GB", { dateStyle: "medium" })}. Overall website health: ${result.overallScore ?? "not scored"}/100.`,
     opportunity: top.map((i) => `${i.title}: ${i.evidence}`).join("\n"),
     approach: ["Discover", "Design", "Build", "Launch"],
     solution: service?.clientFacing ?? svc?.name ?? "",

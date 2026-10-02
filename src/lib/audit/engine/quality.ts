@@ -65,7 +65,7 @@ export function trust(ctx: Ctx): ModuleOut {
   if (portfolioTypes.includes(ctx.business.type) && !any("portfolio") && !any("caseStudies")) f.push(F("trust.portfolio", "medium", "trust", "No portfolio or project gallery", `For a ${ctx.business.label.toLowerCase()} business, no portfolio, projects or gallery page was found.`, "Buyers want to see past work before they enquire.", "Add a projects/portfolio section with photos and short descriptions.", { affects: ["trust", "conversion"], kind: "business", effort: "project" }));
   if (!any("team") && !pagesLike(ctx, /about|team/).length) f.push(F("trust.team", "low", "trust", "No team or about information", "No about page or team section was found.", "People buy from people; a faceless site feels less trustworthy.", "Add an about page with the founder/team, story and photos.", { affects: ["trust"], kind: "business" }));
   const hasForms = ctx.pages.some((p) => p.forms.some((x) => x.purpose !== "search"));
-  if (hasForms && !ctx.pages.some((p) => p.trust.policies.includes("privacy"))) f.push(F("trust.privacy", "medium", "trust", "No privacy policy", "The site collects details through forms but no privacy policy link was found.", "Visitors (and India's data protection rules) expect to know how personal data is used.", "Publish a privacy policy and link it in the footer and next to forms.", { affects: ["trust", "security"], kind: "business" }));
+  if (hasForms && !ctx.pages.some((p) => p.trust.policies.includes("privacy"))) f.push(F("trust.privacy", "medium", "trust", "No privacy policy", "The site collects details through forms but no privacy policy link was found.", "Visitors, and privacy laws in many countries, expect to know how personal data is used.", "Publish a privacy policy and link it in the footer and next to forms.", { affects: ["trust", "security"], kind: "business" }));
   if (!ctx.pages.some((p) => p.trust.socials.length)) f.push(F("trust.socials", "low", "trust", "No social media links", "No links to Instagram, Facebook, LinkedIn or YouTube were found.", "Active social profiles reassure visitors the business is real and current.", "Link active social profiles in the header or footer.", { affects: ["trust"], kind: "business" }));
   return { findings: f, strengths: s };
 }
@@ -141,7 +141,7 @@ export function security(ctx: Ctx): ModuleOut {
 const EXPECT: Partial<Record<Ctx["business"]["type"], { what: string; re: RegExp; why: string }[]>> = {
   real_estate: [
     { what: "property listings / projects", re: /propert|projects?|listings?|apartments?|villas?|plots?|bhk|floor plan/, why: "Buyers want to browse available properties." },
-    { what: "property details (area, configuration, price)", re: /sq\.? ?ft|sqft|carpet area|super built|\bbhk\b|price on request|₹/, why: "Details qualify buyers before they call." },
+    { what: "property details (area, configuration, price)", re: /sq\.? ?ft|sqft|carpet area|super built|\bbhk\b|price on request|bed(room)?s?\b|₹|\$|£|aed/, why: "Details qualify buyers before they call." },
     { what: "brochure / floor-plan download", re: /brochure|floor ?plan|download/, why: "A brochure download is a classic real-estate lead capture." },
     { what: "site visit booking", re: /site visit|schedule a visit|book a visit/, why: "Site visits are the key conversion step." },
   ],

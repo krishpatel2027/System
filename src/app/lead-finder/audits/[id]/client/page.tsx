@@ -6,7 +6,7 @@ import { useDB } from "@/lib/store";
 import { businessName, useAuditRecord } from "@/lib/audit/client";
 import { computeRecord, SCORE_KEYS, SCORE_LABEL } from "@/lib/audit/engine/report";
 import type { Finding } from "@/lib/audit/types";
-import { inr } from "@/lib/utils";
+import { moneyFor } from "@/lib/leadfinder/markets";
 
 const priority = (f: Finding) => (f.severity === "critical" || f.severity === "high" ? "High" : f.severity === "medium" ? "Medium" : "Low");
 const tone = (v: number | null) => (v === null ? "#9ca3af" : v >= 80 ? "#059669" : v >= 60 ? "#d97706" : "#dc2626");
@@ -27,7 +27,10 @@ export default function ClientReportPage({ params }: { params: Promise<{ id: str
   const opportunities = r.issues.filter((i) => i.severity !== "info" && i.source !== "ai").slice(0, 8);
   const improvements = [...r.highImpact, ...r.quickWins].filter((f, i, a) => a.findIndex((x) => x.id === f.id) === i).slice(0, 12);
   const name = businessName(rec.raw);
-  const date = new Date(rec.createdAt).toLocaleDateString("en-IN", { dateStyle: "long" });
+  // Prices are shown in the lead's currency; with no saved rate a foreign client sees no price rather than rupees.
+  const money = moneyFor(rec.country, db.finder.fx);
+  const price = (n: number) => (money.needsRate ? "" : ` — from ${money.fmt(n)}`);
+  const date = new Date(rec.createdAt).toLocaleDateString("en-GB", { dateStyle: "long" });
 
   return (
     <div className="min-h-screen bg-white text-neutral-900">
@@ -108,7 +111,7 @@ export default function ClientReportPage({ params }: { params: Promise<{ id: str
         {opts.service && r.opportunity.recommended && (
           <section className="break-inside-avoid rounded-xl border border-neutral-200 p-5">
             <h2 className="text-[18px] font-semibold">Recommended solution</h2>
-            <div className="mt-1 text-[16px] font-semibold">{r.opportunity.recommended.name} — from {inr(r.opportunity.recommended.price)}</div>
+            <div className="mt-1 text-[16px] font-semibold">{r.opportunity.recommended.name}{price(r.opportunity.recommended.price)}</div>
             <p className="mt-1 text-neutral-600">{db.services.find((x) => x.id === r.opportunity.recommended!.serviceId)?.clientFacing}</p>
             <p className="mt-2 text-[12px] text-neutral-500">Addresses: {r.opportunity.improvementAreas.join(", ")}.</p>
           </section>

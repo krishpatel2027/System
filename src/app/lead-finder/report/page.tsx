@@ -8,6 +8,7 @@ import { SIGNALS, PART_LABELS } from "@/lib/leadfinder/catalog";
 import { miniAudit } from "@/lib/leadfinder/outreach";
 import { inr } from "@/lib/utils";
 import { SOURCE_LABEL } from "@/components/leadfinder";
+import { MARKETS, isForeign } from "@/lib/leadfinder/markets";
 
 const fact = (p: Prospect, key: string, v?: string | number) =>
   v === undefined || v === "" ? "Not found" : `${v}${p.provenance[key] ? ` (${p.provenance[key].confidence}, ${SOURCE_LABEL[p.provenance[key].source]})` : ""}`;
@@ -21,7 +22,7 @@ function One({ p }: { p: Prospect }) {
         <div>
           <div className="text-[11px] uppercase tracking-widest text-neutral-500">{db.settings.studio} · Lead report</div>
           <h1 className="mt-1 text-[26px] font-semibold tracking-tight">{p.name}</h1>
-          <div className="text-[13px] text-neutral-600">{[p.industry || p.category, p.area, p.city].filter(Boolean).join(" · ")}</div>
+          <div className="text-[13px] text-neutral-600">{[p.industry || p.category, p.area, p.city, isForeign(p.country) ? MARKETS[p.country as keyof typeof MARKETS].name : undefined].filter(Boolean).join(" · ")}</div>
         </div>
         <div className="text-right">
           <div className="text-[40px] font-semibold leading-none tabular-nums">{p.score?.total ?? "–"}</div>
@@ -108,7 +109,7 @@ function Report() {
                 {list.map((p) => (
                   <tr key={p.id} className="border-b border-neutral-100 align-top">
                     <td className="py-1.5 pr-2 font-semibold tabular-nums">{p.score?.total ?? "–"}</td>
-                    <td className="py-1.5 pr-2"><div className="font-medium">{p.name}</div><div className="text-neutral-500">{[p.industry, p.city].filter(Boolean).join(" · ")}</div></td>
+                    <td className="py-1.5 pr-2"><div className="font-medium">{p.name}</div><div className="text-neutral-500">{[p.industry, p.city, isForeign(p.country) ? MARKETS[p.country as keyof typeof MARKETS].name : undefined].filter(Boolean).join(" · ")}</div></td>
                     <td className="py-1.5 pr-2">{[p.phone, p.email].filter(Boolean).join(" · ") || "Not found"}</td>
                     <td className="py-1.5 pr-2">{p.website ? `${p.website.replace(/^https?:\/\//, "")} (${p.websiteStatus})` : "None found"}</td>
                     <td className="py-1.5 pr-2">{p.match?.serviceName ?? "—"}</td>

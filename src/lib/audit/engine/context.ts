@@ -7,6 +7,7 @@ export type BusinessType =
   | "hotel" | "education" | "portfolio" | "interior" | "local" | "general";
 
 export interface Ctx {
+  country?: string; // market code of the lead, when known
   raw: AuditRaw;
   site: SiteData;
   all: PageData[];
@@ -101,7 +102,7 @@ export function detectBusiness(pages: PageData[], home: PageData | undefined, ec
     : { type: "general", label: "General business", confidence: "estimated", evidence: ["No industry-specific signals detected"] };
 }
 
-export function buildCtx(raw: AuditRaw, hint?: string): Ctx {
+export function buildCtx(raw: AuditRaw, hint?: string, country?: string): Ctx {
   const pages = raw.pages.filter((p) => p.ok);
   const home = pages.find((p) => p.depth === 0) ?? pages[0];
   const ok = (r: BrowserRun) => r.ok && !!r.metrics;
@@ -113,6 +114,6 @@ export function buildCtx(raw: AuditRaw, hint?: string): Ctx {
   const isLocal = ["real_estate", "restaurant", "clinic", "law", "hotel", "education", "interior", "local", "manufacturer"].includes(business.type) || pages.some((p) => !!p.contact.address);
   return {
     raw, site: raw.site, all: raw.pages, pages, home, desk, mob, runs: raw.browser.filter(ok),
-    psi: raw.pagespeed?.ok ? raw.pagespeed : undefined, ai: raw.ai ?? undefined, business, ecommerce, isLocal,
+    psi: raw.pagespeed?.ok ? raw.pagespeed : undefined, ai: raw.ai ?? undefined, business, ecommerce, isLocal, country,
   };
 }

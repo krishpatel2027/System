@@ -8,12 +8,13 @@ import type { Prospect, ProspectStatus } from "@/lib/types";
 import type { ResolveResult } from "@/lib/leadfinder/server/resolve";
 import { SIGNALS } from "@/lib/leadfinder/catalog";
 import { opportunityLabel } from "@/lib/leadfinder/engine";
-import { CHANNELS, miniAudit, outreach, waLink, type Channel } from "@/lib/leadfinder/outreach";
+import { CHANNELS, miniAudit, outreach, preferredChannel, priceText, waLink, type Channel } from "@/lib/leadfinder/outreach";
+import { MARKETS, dialDigits, isForeign, marketOf } from "@/lib/leadfinder/markets";
 import { applyResolution, lfApi, useFinderStatus, useProspectActions } from "@/lib/leadfinder/client";
 import { STAGES } from "@/lib/stages";
 import { cn } from "@/lib/utils";
 import { Badge, Btn, Card, CardHeader, Empty, Field, inputCls, Modal, Tabs } from "@/components/ui";
-import { AuditView, ConfidenceTag, DataRow, ExtLink, OpportunityCard, ScoreBars, ScoreRing, SOURCE_LABEL, WebsiteBadge, prospectStatus } from "@/components/leadfinder";
+import { AuditView, ConfidenceTag, DataRow, ExtLink, LocalTime, OpportunityCard, placeLabel, ScoreBars, ScoreRing, SOURCE_LABEL, WebsiteBadge, prospectStatus } from "@/components/leadfinder";
 
 export default function ProspectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -65,7 +66,7 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
   const recheckWebsite = async () => {
     setBusy("resolve"); setErr(null);
     try {
-      const r = await lfApi<ResolveResult>("resolve", { name: p.name, city: p.city, address: p.address, phone: p.phone, website: p.provenance.website?.source === "manual" ? p.website : p.websiteCheck?.listingWebsite ?? p.website, placeId: p.placeId, allowSearch: true });
+      const r = await lfApi<ResolveResult>("resolve", { name: p.name, city: p.city, address: p.address, phone: p.phone, website: p.provenance.website?.source === "manual" ? p.website : p.websiteCheck?.listingWebsite ?? p.website, placeId: p.placeId, country: p.country, allowSearch: true });
       const latest = db.prospects.find((x) => x.id === p.id) ?? p;
       act.reevaluate(applyResolution(latest, r));
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
@@ -99,7 +100,7 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
             <h1 className="mt-0.5 text-[26px] font-semibold leading-tight tracking-[-0.02em]">{p.name}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted">
               <span>{p.industry || p.category || "Industry not set"}</span>
-              {(p.area || p.city) && <span className="inline-flex items-center gap-1"><MapPin size={12} />{[p.area, p.city].filter(Boolean).join(", ")}</span>}
+              {(p.area || p.city || isForeign(p.country)) && <span className="inline-flex items-center gap-1"><MapPin size={12} />{placeLabel(p)}</span>}
               {p.rating !== undefined && <span className="inline-flex items-center gap-1"><Star size={12} className="fill-amber-400 text-amber-400" />{p.rating.toFixed(1)} · {p.reviewCount ?? 0} reviews</span>}
             </div>
             <div className="mt-3 flex flex-wrap gap-1.5"><WebsiteBadge status={p.websiteStatus} />{lead ? <Badge tone="green" dot>In pipeline · {STAGES.find((s) => s.id === lead.stage)?.label}</Badge> : <Badge tone={prospectStatus(p.status).tone}>{prospectStatus(p.status).label}</Badge>}</div>
@@ -166,8 +167,8 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
           <OutreachCard p={p} ai={ai} onContacted={(ch) => act.markContacted(p, ch)} contacted={!!lead && lead.stage !== "new" && lead.stage !== "qualified"} />
 
           <Card>
-            <CardHeader title="30-second mini audit" sub="A short, shareable summary for the prospect" action={<CopyBtn text={miniAudit(p)} />} />
-            <pre className="m-5 mt-3 whitespace-pre-wrap rounded-xl bg-surface-2 p-4 font-sans text-[13px] leading-relaxed">{miniAudit(p)}</pre>
+            <CardHeader title="30-second mini audit" sub="A short, shareable summary for the prospect" action={<CopyBtn text={miniAudit(p, db.finder.fx)} />} />
+            <pre className="m-5 mt-3 whitespace-pre-wrap rounded-xl bg-surface-2 p-4 font-sans text-[13px] leading-relaxed">{miniAudit(p, db.finder.fx)}</pre>
           </Card>
         </div>
 
@@ -182,7 +183,8 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
           <Card>
             <CardHeader title="Contact" sub="Official business channels only" action={<Btn size="sm" variant="ghost" onClick={() => setEdit(true)} className="no-print"><Pencil size={12} /> Edit</Btn>} />
             <div className="divide-y divide-line px-5 pb-2">
-              <DataRow label="Phone" icon={<Phone size={13} />} value={p.phone} prov={p.provenance.phone} href={p.phone ? `tel:${p.phone.replace(/\s/g, "")}` : undefined} />
+              <LocalTime p={p} />
+              <DataRow label="Phone" icon={<Phone size={13} />} value={p.phone} prov={p.provenance.phone} href={p.phone ? `tel:${dialDigits(p.phone, p.country) ? `+${dialDigits(p.phone, p.country)}` : p.phone.replace(/\s/g, "")}` : undefined} />
               <DataRow label="WhatsApp" icon={<MessageCircle size={13} />} value={p.whatsapp} prov={p.provenance.whatsapp} />
               <DataRow label="Email" icon={<Mail size={13} />} value={p.email} prov={p.provenance.email} href={p.email ? `mailto:${p.email}` : undefined} />
               <DataRow label="Website" icon={<Globe size={13} />} value={p.website} prov={p.provenance.website} href={p.website ? (/^https?:/.test(p.website) ? p.website : `https://${p.website}`) : undefined} />
@@ -197,6 +199,7 @@ function Detail({ p, userName }: { p: Prospect; userName: string }) {
           <Card>
             <CardHeader title="Business intelligence" />
             <div className="divide-y divide-line px-5 pb-2">
+              <DataRow label="Country" value={p.country ? MARKETS[p.country as keyof typeof MARKETS]?.name : undefined} prov={p.provenance.country} />
               <DataRow label="Category" value={p.category} prov={p.provenance.category} />
               <DataRow label="Address" value={p.address} prov={p.provenance.address} />
               <DataRow label="Google rating" value={p.rating !== undefined ? `${p.rating.toFixed(1)} / 5` : undefined} prov={p.provenance.rating} />
@@ -235,11 +238,17 @@ function CopyBtn({ text, label = "Copy" }: { text: string; label?: string }) {
 }
 
 function OutreachCard({ p, ai, onContacted, contacted }: { p: Prospect; ai: boolean; onContacted: (ch: string) => void; contacted: boolean }) {
-  const [ch, setCh] = useState<Channel>("whatsapp");
+  const [ch, setCh] = useState<Channel>(() => preferredChannel(p));
+  const market = isForeign(p.country) ? marketOf(p.country) : undefined;
   return (
     <Card>
       <CardHeader title="Outreach" sub="Observation → opportunity → solution → call to action. Review before sending." />
       <div className="space-y-3 p-5">
+        {market && (
+          <div className="rounded-xl bg-amber-50 px-3 py-2 text-[12.5px] leading-relaxed text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            <b>{market.name}.</b> {market.whatsapp ? "WhatsApp is widely used for business here." : "Email or a call usually works better than WhatsApp here."} {market.emailNote} Rules change, and this is not legal advice. Check them before contacting anyone.
+          </div>
+        )}
         <div className="-mx-1 overflow-x-auto px-1"><Tabs tabs={CHANNELS} value={ch} onChange={setCh} /></div>
         <OutreachEditor key={`${ch}-${p.score?.total}-${p.match?.serviceId}-${p.decisionMaker?.name}-${p.audit?.analyzedAt}`} p={p} ch={ch} ai={ai} onContacted={onContacted} contacted={contacted} />
         <div className="text-[11.5px] text-subtle">Nothing is sent automatically. Opening WhatsApp or email only prepares the message for you to send.</div>
@@ -250,19 +259,19 @@ function OutreachCard({ p, ai, onContacted, contacted }: { p: Prospect; ai: bool
 
 function OutreachEditor({ p, ch, ai, onContacted, contacted }: { p: Prospect; ch: Channel; ai: boolean; onContacted: (ch: string) => void; contacted: boolean }) {
   const { db } = useDB();
-  const [draft, setDraft] = useState(() => outreach(p, ch, db.settings));
+  const [draft, setDraft] = useState(() => outreach(p, ch, db.settings, db.finder.fx));
   const [aiBusy, setAiBusy] = useState(false);
   const [aiErr, setAiErr] = useState<string | null>(null);
 
   const personalize = async () => {
     setAiBusy(true); setAiErr(null);
     try {
-      const r = await lfApi<{ draft: { subject: string; body: string } }>("ai", { task: "outreach", prospect: p, channel: ch, sender: { owner: db.settings.owner, studio: db.settings.studio, website: db.settings.website } });
+      const r = await lfApi<{ draft: { subject: string; body: string } }>("ai", { task: "outreach", prospect: p, channel: ch, price: priceText(p, db.finder.fx), sender: { owner: db.settings.owner, studio: db.settings.studio, website: db.settings.website } });
       setDraft({ subject: ch === "email" ? r.draft.subject : undefined, body: r.draft.body });
     } catch (e) { setAiErr((e as Error).message); } finally { setAiBusy(false); }
   };
   const full = draft.subject ? `Subject: ${draft.subject}\n\n${draft.body}` : draft.body;
-  const wa = ch === "whatsapp" ? waLink(p.whatsapp ?? p.phone, draft.body) : undefined;
+  const wa = ch === "whatsapp" ? waLink(p.whatsapp ?? p.phone, draft.body, p.country) : undefined;
   const mail = ch === "email" && p.email ? `mailto:${p.email}?subject=${encodeURIComponent(draft.subject ?? "")}&body=${encodeURIComponent(draft.body)}` : undefined;
 
   return (

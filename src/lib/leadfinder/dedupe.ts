@@ -1,4 +1,5 @@
 import type { Prospect } from "../types";
+import { nationalNumber } from "./markets";
 
 // Duplicate detection across Google place id, website domain, phone and name+city.
 
@@ -13,10 +14,8 @@ export const normDomain = (url?: string) => {
   }
 };
 
-export const normPhone = (p?: string) => {
-  const d = (p ?? "").replace(/\D/g, "");
-  return d.length >= 10 ? d.slice(-10) : "";
-};
+// "+971 50 123 4567" and "050 123 4567" are the same number.
+export const normPhone = (p?: string, country?: string) => nationalNumber(p, country);
 
 export const normName = (s?: string) =>
   (s ?? "")
@@ -26,14 +25,14 @@ export const normName = (s?: string) =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
-type Keyed = Pick<Prospect, "name" | "city" | "website" | "phone" | "placeId" | "address">;
+type Keyed = Pick<Prospect, "name" | "city" | "website" | "phone" | "placeId" | "address"> & { country?: string };
 
 export function keysOf(p: Keyed): string[] {
   const keys: string[] = [];
   if (p.placeId) keys.push(`pid:${p.placeId}`);
   const d = normDomain(p.website);
   if (d) keys.push(`dom:${d}`);
-  const ph = normPhone(p.phone);
+  const ph = normPhone(p.phone, p.country);
   if (ph) keys.push(`tel:${ph}`);
   const n = normName(p.name);
   const place = normName(p.city || p.address?.split(",").slice(-3, -2)[0]);

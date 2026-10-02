@@ -1,5 +1,6 @@
 import { body, gate, json } from "@/lib/leadfinder/server/http";
 import { ProviderError } from "@/lib/leadfinder/server/providers";
+import { isMarket } from "@/lib/leadfinder/markets";
 import { resolveWebsite, type ResolveInput } from "@/lib/leadfinder/server/resolve";
 
 export const maxDuration = 60;
@@ -14,7 +15,7 @@ export async function POST(req: Request) {
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 500) : undefined);
   try {
     return json(await resolveWebsite({
-      name: b.name.slice(0, 200), city: str(b.city), address: str(b.address), phone: str(b.phone), website: str(b.website), placeId: str(b.placeId),
+      name: b.name.slice(0, 200), city: str(b.city), address: str(b.address), phone: str(b.phone), website: str(b.website), placeId: str(b.placeId), country: isMarket(b.country) ? b.country : undefined,
       allowSearch: b.allowSearch !== false,
     }));
   } catch (e) {

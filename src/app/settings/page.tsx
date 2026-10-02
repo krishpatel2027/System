@@ -10,12 +10,13 @@ import { Card, Btn, Field, inputCls, PageHeader, Badge } from "@/components/ui";
 import {
   Building2, Receipt, Package as PackageIcon, ListChecks, Wrench, ScrollText, Users, Database,
   Plus, Trash2, ArrowUp, ArrowDown, X, Check, Search, RotateCcw, Download, Upload, LogOut, RefreshCw, AlertTriangle, Star,
-  Gauge, PlugZap,
+  Gauge, PlugZap, Globe,
 } from "lucide-react";
 import type { DB, PricingConfig, Settings, RateItem, ScoringConfig } from "@/lib/types";
 import { DEFAULT_SCORING, PART_LABELS } from "@/lib/leadfinder/catalog";
 import { evaluate } from "@/lib/leadfinder/engine";
 import { useFinderStatus } from "@/lib/leadfinder/client";
+import { FOREIGN_MARKETS, MARKETS, type MarketCode } from "@/lib/leadfinder/markets";
 
 const SECTIONS = [
   { id: "studio", label: "Studio profile", icon: Building2, desc: "How your studio appears on quotes and proposals." },
@@ -25,6 +26,7 @@ const SECTIONS = [
   { id: "care", label: "Care plans", icon: Wrench, desc: "Monthly maintenance plans offered after launch." },
   { id: "terms", label: "Terms & policies", icon: ScrollText, desc: "Your policies, and which ones print on quotes." },
   { id: "scoring", label: "Lead scoring", icon: Gauge, desc: "How the Arkria Opportunity Score weighs each factor. Saving re-scores every lead." },
+  { id: "markets", label: "International markets", icon: Globe, desc: "Exchange rates used to show a foreign lead's value in its own currency." },
   { id: "integrations", label: "Integrations", icon: PlugZap, desc: "Lead discovery and analysis connections. Keys live on the server only." },
   { id: "team", label: "Team & access", icon: Users, desc: "Who's signed in, sync status and access." },
   { id: "data", label: "Data & backup", icon: Database, desc: "Export, restore or clear workspace data." },
@@ -158,6 +160,7 @@ function SettingsInner() {
           {section === "care" && <CareSection p={draft.pricing} set={setP} />}
           {section === "terms" && <TermsSection p={draft.pricing} set={setP} />}
           {section === "scoring" && <ScoringSection sc={draft.scoring} set={setSc} />}
+          {section === "markets" && <MarketsSection />}
           {section === "integrations" && <IntegrationsSection />}
           {section === "team" && <TeamSection />}
           {section === "data" && <DataSection db={db} update={update} replace={replace} />}
@@ -216,6 +219,68 @@ function ScoringSection({ sc, set }: { sc: ScoringConfig; set: (p: Partial<Scori
         <span>The Arkria Opportunity Score is your own prioritisation, not an objective rating of a business.</span>
         <Btn size="sm" variant="ghost" onClick={() => set(DEFAULT_SCORING)}><RotateCcw size={12} /> Defaults</Btn>
       </div>
+    </div>
+  );
+}
+
+// Rupees per 1 unit of each currency. Typed by the team: the app never ships a rate.
+// Saves as you leave each box (like the other sections that apply immediately).
+function MarketsSection() {
+  const { db, mutate } = useDB();
+  const fx = db.finder.fx ?? {};
+  const [edit, setEdit] = useState<Record<string, string>>({});
+  const currencies = [...new Map(FOREIGN_MARKETS.map((m) => [m.currency, m])).values()];
+  const commit = (cur: string) => {
+    const raw = edit[cur];
+    if (raw === undefined) return;
+    const n = parseFloat(raw);
+    mutate((d) => {
+      const next = { ...(d.finder.fx ?? {}) };
+      if (raw.trim() === "" || !(n > 0)) delete next[cur];
+      else next[cur] = n;
+      return { finder: { ...d.finder, fx: next } };
+    });
+    setEdit((s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== cur)));
+  };
+  const countries = (cur: string) => FOREIGN_MARKETS.filter((m) => m.currency === cur).map((m) => m.name).join(", ");
+  return (
+    <div className="space-y-4">
+      <Card className="p-5">
+        <div className="text-[14px] font-semibold">Exchange rates</div>
+        <p className="mt-1 text-[12.5px] text-muted">
+          Your service prices stay in rupees. For a lead abroad, Lead Finder shows its estimated value in the lead&apos;s currency, and reads budgets like &ldquo;under $5k&rdquo; in searches, using the rate you enter here.
+          Use the rate you actually quote at. No rates are built in, so until you add one, foreign leads are shown in ₹ and any price in an outreach message is left out.
+        </p>
+        <div className="mt-4 space-y-3">
+          {currencies.map((m) => {
+            const code = m.currency;
+            const value = edit[code] ?? (fx[code] !== undefined ? String(fx[code]) : "");
+            return (
+              <div key={code} className="grid items-center gap-2 sm:grid-cols-[1fr_220px]">
+                <div><div className="text-[13.5px] font-medium">{code}</div><div className="text-[11.5px] text-subtle">{countries(code)}</div></div>
+                <div className="flex items-center gap-2">
+                  <span className="whitespace-nowrap text-[12.5px] text-muted">1 {code} = ₹</span>
+                  <input type="number" min={0} step="0.01" className={cn(inputCls, "h-9 text-right tabular-nums")} value={value} placeholder="Not set"
+                    onChange={(e) => setEdit((s) => ({ ...s, [code]: e.target.value }))} onBlur={() => commit(code)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} aria-label={`Rupees per ${code}`} />
+                  {fx[code] !== undefined && edit[code] === undefined && <Check size={14} className="shrink-0 text-emerald-500" aria-label="Saved" />}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+      <Card className="p-5">
+        <div className="text-[14px] font-semibold">Markets Lead Finder can search</div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {(Object.keys(MARKETS) as MarketCode[]).map((c) => (
+            <div key={c} className="rounded-xl bg-surface-2 px-3 py-2 text-[12.5px]">
+              <span className="font-medium">{MARKETS[c].name}</span>
+              <span className="text-muted"> · {MARKETS[c].currency} · {MARKETS[c].cities.length} built-in {MARKETS[c].cities.length === 1 ? "city" : "cities"} · {MARKETS[c].whatsapp ? "WhatsApp common" : "email / calls"}</span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-[12px] text-subtle">Any city can be typed in. Choose the country in Lead Finder for places that aren&apos;t in the built-in list.</p>
+      </Card>
     </div>
   );
 }

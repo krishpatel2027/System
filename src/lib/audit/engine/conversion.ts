@@ -1,4 +1,5 @@
 import type { AuditResult, Cta, Finding, PageData, Strength } from "../types";
+import { marketOf } from "../../leadfinder/markets";
 import { type Ctx, type ModuleOut, finding as F, strength as S, list, path, pagesLike, plural } from "./context";
 
 // UX, navigation, user journeys, conversion, lead generation and forms.
@@ -122,7 +123,7 @@ export function conversion(ctx: Ctx): ModuleOut & { leadGen: AuditResult["leadGe
   if (top && top[1] >= 3) s.push(S("conversion", `Consistent primary action ("${top[0]}" appears ${top[1]} times)`));
 
   // Contact channels
-  if (!has("whatsapp") && !ctx.ecommerce) f.push(F("conv.whatsapp", "medium", "leadGeneration", "No WhatsApp contact", `No WhatsApp link was found across ${plural(ctx.pages.length, "page")}.`, "Many Indian customers prefer WhatsApp over forms or calls.", "Add a click-to-WhatsApp button (header and floating on mobile).", { affects: ["leadGeneration", "conversion", "mobile"], kind: "business" }));
+  if (!has("whatsapp") && !ctx.ecommerce && marketOf(ctx.country)?.whatsapp !== false) f.push(F("conv.whatsapp", "medium", "leadGeneration", "No WhatsApp contact", `No WhatsApp link was found across ${plural(ctx.pages.length, "page")}.`, "Many customers here prefer WhatsApp over forms or calls.", "Add a click-to-WhatsApp button (header and floating on mobile).", { affects: ["leadGeneration", "conversion", "mobile"], kind: "business" }));
   else if (has("whatsapp")) s.push(S("leadGeneration", "WhatsApp contact available"));
   if (!has("call") && phonesText) f.push(F("conv.tel", "low", "leadGeneration", "Phone number isn't tappable", "A phone number appears in the text, but no tel: link was found.", "Mobile visitors can't call with one tap.", "Wrap phone numbers in tel: links.", { affects: ["leadGeneration", "mobile"], kind: "business" }));
   if (!has("call") && !phonesText) f.push(F("conv.no_phone", "medium", "leadGeneration", "No phone number on the website", `No phone number was found across ${plural(ctx.pages.length, "page")}.`, "Visitors who prefer calling can't reach you and the business looks less established.", "Show a phone number in the header or footer with a tap-to-call link.", { affects: ["leadGeneration", "trust"], kind: "business" }));

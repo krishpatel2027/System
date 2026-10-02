@@ -50,13 +50,14 @@ export function downloadFile(name: string, content: string, type = "text/csv;cha
 }
 
 // Maps an uploaded header row to the import columns, tolerating naming variations.
-export const IMPORT_COLUMNS = ["Business Name", "Industry", "Location", "Website", "Phone", "Email", "Instagram", "LinkedIn", "Notes"] as const;
+export const IMPORT_COLUMNS = ["Business Name", "Industry", "Location", "Country", "Website", "Phone", "Email", "Instagram", "LinkedIn", "Notes"] as const;
 export type ImportColumn = (typeof IMPORT_COLUMNS)[number];
 
 const ALIASES: Record<ImportColumn, string[]> = {
   "Business Name": ["business name", "business", "name", "company", "company name", "brand"],
   Industry: ["industry", "category", "type", "sector"],
   Location: ["location", "city", "address", "area"],
+  Country: ["country", "country code", "market"],
   Website: ["website", "url", "site", "web", "domain"],
   Phone: ["phone", "mobile", "contact", "phone number", "contact number", "whatsapp"],
   Email: ["email", "e-mail", "mail", "email address"],

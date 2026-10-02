@@ -1,14 +1,45 @@
 "use client";
-import React from "react";
+import React, { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Check, CircleDashed, ExternalLink, Gauge, Globe, Loader2, MapPin, Phone, PlugZap, Star } from "lucide-react";
+import { Check, CircleDashed, Clock, ExternalLink, Gauge, Globe, Loader2, MapPin, Phone, PlugZap, Star } from "lucide-react";
 import type { Confidence, Finding, Prospect, ScoreBreakdown, ScoringConfig, SourceId, WebsiteStatus } from "@/lib/types";
 import { SIGNALS, PART_LABELS } from "@/lib/leadfinder/catalog";
 import { opportunityLabel } from "@/lib/leadfinder/engine";
 import { STAGE_LABELS, type Progress, type Stage } from "@/lib/leadfinder/client";
 import { cn, inr } from "@/lib/utils";
+import { useDB } from "@/lib/store";
+import { MARKETS, isForeign, localTime, moneyFor, tzFor } from "@/lib/leadfinder/markets";
 import { Badge, Card, Progress as Bar } from "@/components/ui";
+
+// "Navrangpura, Ahmedabad" or, for a lead abroad, "Austin, United States".
+export function placeLabel(p: Pick<Prospect, "area" | "city" | "country">) {
+  return [p.area, p.city, isForeign(p.country) ? MARKETS[p.country as keyof typeof MARKETS].name : undefined].filter(Boolean).join(", ");
+}
+
+// Amounts in the lead's currency, using the rate saved in Settings.
+export function useMoney(country?: string) {
+  const { db } = useDB();
+  return moneyFor(country, db.finder.fx);
+}
+
+const subscribeMinute = (cb: () => void) => { const t = setInterval(cb, 30_000); return () => clearInterval(t); };
+const minuteNow = () => Math.floor(Date.now() / 60_000) * 60_000;
+
+// What time it is where the business is, and how that compares to India, so
+// calls and messages land in working hours.
+export function LocalTime({ p }: { p: Pick<Prospect, "country" | "city"> }) {
+  const now = useSyncExternalStore(subscribeMinute, minuteNow, () => 0);
+  const tz = tzFor(p.country, p.city);
+  if (!tz || !now || !isForeign(p.country)) return null;
+  const t = localTime(tz, now);
+  return (
+    <div className="flex items-center gap-1.5 border-b border-line py-2.5 text-[12.5px] text-muted">
+      <Clock size={12} className="shrink-0 text-subtle" />
+      <span>Local time{p.city ? ` in ${p.city}` : ""}: <b className="font-medium text-ink">{t.label}</b> · {t.vsIndia}</span>
+    </div>
+  );
+}
 
 export const SOURCE_LABEL: Record<SourceId, string> = {
   google_places: "Google Business listing",
@@ -110,6 +141,7 @@ export const prospectStatus = (s: Prospect["status"]) => STATUS[s];
 
 export function ProspectCard({ p, cfg, selected, onSelect, inPipeline }: { p: Prospect; cfg: ScoringConfig; selected?: boolean; onSelect?: (v: boolean) => void; inPipeline?: string }) {
   const op = opportunityLabel(p.score?.total, cfg);
+  const money = useMoney(p.country);
   return (
     <Card className={cn("group relative flex flex-col p-4 transition hover:-translate-y-px hover:border-line-strong hover:shadow-md", selected && "border-accent ring-2 ring-accent/20")}>
       {onSelect && (
@@ -122,7 +154,7 @@ export function ProspectCard({ p, cfg, selected, onSelect, inPipeline }: { p: Pr
             <div className="truncate text-[14.5px] font-semibold tracking-tight">{p.name}</div>
             <div className="mt-0.5 flex items-center gap-1 truncate text-[12px] text-muted">
               {p.industry || p.category || "Industry not set"}
-              {(p.area || p.city) && <><span className="text-subtle">·</span><MapPin size={11} className="shrink-0" /><span className="truncate">{[p.area, p.city].filter(Boolean).join(", ")}</span></>}
+              {(p.area || p.city || isForeign(p.country)) && <><span className="text-subtle">·</span><MapPin size={11} className="shrink-0" /><span className="truncate">{placeLabel(p)}</span></>}
             </div>
           </div>
           <ScoreRing score={p.score?.total} cfg={cfg} size={46} />
@@ -148,7 +180,7 @@ export function ProspectCard({ p, cfg, selected, onSelect, inPipeline }: { p: Pr
             </div>
           ) : <div className="text-[12px] text-subtle">No clear service match</div>}
           <div className="text-right">
-            {p.match && <div className="text-[13px] font-semibold tabular-nums">{inr(p.match.price)}</div>}
+            {p.match && <div className="text-[13px] font-semibold tabular-nums">{money.fmt(p.match.price)}</div>}
             {inPipeline ? <div className="text-[11px] text-emerald-600 dark:text-emerald-400">In pipeline · {inPipeline}</div> : <div className="text-[11px] text-subtle">{prospectStatus(p.status).label}</div>}
           </div>
         </div>
@@ -176,6 +208,7 @@ export function ScoreBars({ score, cfg }: { score: ScoreBreakdown; cfg: ScoringC
 
 export function OpportunityCard({ p, compact }: { p: Prospect; compact?: boolean }) {
   const m = p.match;
+  const money = useMoney(p.country);
   if (!m) return (
     <Card className="p-5">
       <div className="text-[12px] font-medium text-subtle">Recommended opportunity</div>
@@ -190,7 +223,7 @@ export function OpportunityCard({ p, compact }: { p: Prospect; compact?: boolean
       <div className="text-[12px] font-medium text-subtle">Recommended opportunity</div>
       <div className="mt-1 text-[18px] font-semibold tracking-tight">{m.serviceName}</div>
       <div className={cn("mt-4 grid gap-3", compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4")}>
-        {[["Estimated value", inr(m.price)], ["Delivery", `${m.hours} hrs`], ["Internal cost", inr(m.cost)], ["Margin", `${inr(margin)} · ${pct}%`]].map(([k, v]) => (
+        {[["Estimated value", money.fmt(m.price)], ["Delivery", `${m.hours} hrs`], [money.converted ? "Internal cost (₹)" : "Internal cost", inr(m.cost)], [money.converted ? "Margin (₹)" : "Margin", `${inr(margin)} · ${pct}%`]].map(([k, v]) => (
           <div key={k} className="rounded-xl bg-surface-2 px-3 py-2.5">
             <div className="text-[11px] text-subtle">{k}</div>
             <div className="mt-0.5 text-[14px] font-semibold tabular-nums">{v}</div>
@@ -205,10 +238,14 @@ export function OpportunityCard({ p, compact }: { p: Prospect; compact?: boolean
       </div>
       {m.alternatives.length > 0 && (
         <div className="mt-4 flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
-          Also relevant: {m.alternatives.map((a) => <Badge key={a.serviceId}>{a.serviceName} · {inr(a.price)}</Badge>)}
+          Also relevant: {m.alternatives.map((a) => <Badge key={a.serviceId}>{a.serviceName} · {money.fmt(a.price)}</Badge>)}
         </div>
       )}
-      <div className="mt-3 text-[11px] text-subtle">Estimates from your service catalog. Not a quote.</div>
+      <div className="mt-3 text-[11px] text-subtle">
+        Estimates from your service catalog. Not a quote.
+        {money.converted && ` Shown in ${money.currency} at your saved rate (₹ price: ${inr(m.price)}).`}
+        {money.needsRate && <> Shown in ₹. <Link href="/settings?section=markets" className="text-accent hover:underline">Set the exchange rate</Link> to see it in this lead&apos;s currency.</>}
+      </div>
     </Card>
   );
 }

@@ -4,6 +4,7 @@ import type { Cta, CtaKind, FormInfo, PageData } from "../types";
 import { detectTech } from "../technology";
 import { AnalyzeError, guardedFetch, readCapped, robotsCheck } from "./net";
 import { sameSite } from "../urls";
+import { PHONE_TEXT } from "../../leadfinder/markets";
 
 // Fetches one public page (robots.txt respected) and extracts everything the
 // analyzers need from its HTML and response headers. Forms are never submitted.
@@ -182,7 +183,7 @@ export function extractPage(html: string, ctx: { url: string; finalUrl: string; 
 
   // Contact & local
   const telLinks = $$("a[href^='tel:']").map((a) => decodeURIComponent(attr(a, "href").slice(4)).replace(/[^\d+]/g, ""));
-  const textPhones = [...text.matchAll(/(?:\+91[\s-]?|\b0)?[6-9]\d{4}[\s-]?\d{5}\b|\b0\d{2,4}[\s-]\d{6,8}\b/g)].map((m) => m[0].replace(/[^\d+]/g, ""));
+  const textPhones = [...text.matchAll(PHONE_TEXT), ...text.matchAll(/\b0\d{2,4}[\s-]\d{6,8}\b/g)].map((m) => m[0].replace(/[^\d+]/g, ""));
   const phones = [...new Set([...telLinks, ...textPhones].filter((p) => p.replace(/\D/g, "").length >= 10))].slice(0, 5);
   const mails = [...$$("a[href^='mailto:']").map((a) => decodeURIComponent(attr(a, "href").slice(7).split("?")[0]).toLowerCase()), ...[...text.matchAll(/\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi)].map((m) => m[0].toLowerCase())];
   const emails = [...new Set(mails)].filter((e) => !/\.(png|jpe?g|gif|webp|svg)$/i.test(e) && !/example\.|sentry|wixpress|domain\.com/.test(e)).slice(0, 5);
@@ -282,7 +283,7 @@ export function extractPage(html: string, ctx: { url: string; finalUrl: string; 
       cart: allHrefs.some((h) => /\/cart\b|\/basket\b/i.test(h)) || /\bcart\b/.test(navItems.join(" ").toLowerCase()),
       addToCart: /add to (cart|bag)|buy now/.test(lower),
       productSchema: /"@type"\s*:\s*"Product"|itemtype="https?:\/\/schema\.org\/Product"/i.test(html),
-      prices: (text.match(/(₹|rs\.?|inr)\s?\d[\d,]*/gi) ?? []).length,
+      prices: (text.match(/(₹|rs\.?|inr|\$|£|€|usd|gbp|eur|aed|cad|aud|sar|qar|kwd|bhd|omr)\s?\d[\d,]*/gi) ?? []).length,
       checkoutLink: allHrefs.some((h) => /checkout/i.test(h)),
       wishlist: /wishlist|wish list/.test(lower),
       filters: /\b(filter by|sort by|price range|refine)\b/.test(lower),

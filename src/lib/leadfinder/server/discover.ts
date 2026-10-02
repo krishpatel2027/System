@@ -57,7 +57,7 @@ export async function runSavedSearch(db: DB, s: SavedSearch, deadline: number): 
   let searchesLeft = 10;
   await pool(fresh, 4, async (p) => {
     if (Date.now() > deadline) return;
-    const input = { name: p.name, city: p.city, address: p.address, phone: p.phone, website: p.website, placeId: p.placeId };
+    const input = { name: p.name, city: p.city, address: p.address, phone: p.phone, website: p.website, placeId: p.placeId, country: p.country };
     try {
       let r;
       try { r = await resolveWebsite({ ...input, allowSearch: searchesLeft > 0 }); }
